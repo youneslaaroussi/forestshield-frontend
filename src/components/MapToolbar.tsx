@@ -52,15 +52,6 @@ export default function MapToolbar({
         )}
       </button>
       
-      <div className="flex border border-white/20 bg-white/5">
-        <button onClick={onZoomIn} className={`${utilityBtn} border-r border-white/20`} title="Zoom In">
-          <Plus className="w-3 h-3" />
-        </button>
-        <button onClick={onZoomOut} className={`${utilityBtn} border-0`} title="Zoom Out">
-          <Minus className="w-3 h-3" />
-        </button>
-      </div>
-      
       <button onClick={onResetView} className={btn}>
         <MapPinned className="w-3 h-3" />
         Reset

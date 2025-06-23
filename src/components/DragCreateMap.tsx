@@ -381,7 +381,7 @@ export default function DragCreateMap({ onRegionCreated }: DragCreateMapProps) {
             variant={isCreating ? "destructive" : "default"}
             className="w-full"
           >
-            {isCreating ? '❌ Cancel' : '🎯 Drag to Create'}
+            {isCreating ? 'Cancel' : 'Drag to Create'}
           </Button>
           
           {isCreating && (
@@ -390,6 +390,13 @@ export default function DragCreateMap({ onRegionCreated }: DragCreateMapProps) {
               <p className="text-xs text-gray-500">Radius: 0.1km - 50km</p>
             </div>
           )}
+          
+          <div className="text-xs text-gray-500 pt-2 border-t">
+            <div className="font-medium">Regions: {regions.length}</div>
+            {regions.length === 0 && (
+              <div className="text-gray-400 mt-1">No monitoring regions yet</div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -401,6 +408,24 @@ export default function DragCreateMap({ onRegionCreated }: DragCreateMapProps) {
             <div>
               <p className="font-medium">Error</p>
               <p className="text-sm">{error}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Empty State Overlay */}
+      {regions.length === 0 && !isCreating && (
+        <div className="absolute inset-0 z-[1000] bg-black/5 flex items-center justify-center pointer-events-none">
+          <div className="bg-white rounded-lg shadow-lg p-8 text-center max-w-md mx-4">
+            <div className="w-16 h-16 bg-[#f2f3f3] text-[#687078] text-2xl font-bold flex items-center justify-center mb-4 mx-auto" style={{ borderRadius: '2px' }}>
+              MAP
+            </div>
+            <h3 className="text-lg font-semibold text-[#0f1419] mb-2">No Monitoring Regions</h3>
+            <p className="text-[#687078] mb-4">Create your first forest monitoring region by clicking "Drag to Create" and drawing on the map.</p>
+            <div className="text-sm text-[#687078]">
+              <div>• Click and drag to create circular regions</div>
+              <div>• Monitor deforestation in real-time</div>
+              <div>• Set custom radius (0.1km - 50km)</div>
             </div>
           </div>
         </div>

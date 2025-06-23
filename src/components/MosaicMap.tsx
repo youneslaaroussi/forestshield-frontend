@@ -89,6 +89,20 @@ function MapEvents({ isHeatmapVisible, onDataFetched, onError }: { isHeatmapVisi
   return null;
 }
 
+// MapDeselectHandler component to handle deselection on map click
+function MapDeselectHandler({ onRegionDeselected, isCreating }: { onRegionDeselected: () => void, isCreating: boolean }) {
+  useMapEvents({
+    click() {
+      // Only deselect if not in creating mode to avoid conflicts
+      if (!isCreating) {
+        onRegionDeselected();
+      }
+    }
+  });
+
+  return null;
+}
+
 // Custom hook for drag-to-create functionality
 function DragCreateHandler({ 
   onRegionCreated,
@@ -248,6 +262,7 @@ function DragCreateHandler({
 
 interface MosaicMapProps {
   onRegionSelected: (region: Region) => void;
+  onRegionDeselected: () => void;
   onError: (error: string) => void;
   isHeatmapVisible: boolean;
   isSatelliteView: boolean;
@@ -255,24 +270,74 @@ interface MosaicMapProps {
   setIsCreating: (isCreating: boolean) => void;
   onRegionCreated: (region: Region) => void;
   regions: Region[];
+  selectedRegion: Region | null;
 }
 
 const MosaicMap = forwardRef<Map, MosaicMapProps>(({ 
   onRegionSelected, 
+  onRegionDeselected,
   onError,
   isHeatmapVisible,
   isSatelliteView,
   isCreating,
   setIsCreating,
   onRegionCreated,
-  regions
+  regions,
+  selectedRegion
 }, ref) => {
   const [mapInstance, setMapInstance] = useState<Map | null>(null);
   const [heatmapPoints, setHeatmapPoints] = useState<any[]>([]);
+  const [mapKey, setMapKey] = useState<number>(Date.now());
 
   useImperativeHandle(ref, () => mapInstance!, [mapInstance]);
 
   const defaultCenter: [number, number] = [-6.0, -53.0];
+
+  // Cleanup function for map instance
+  useEffect(() => {
+    return () => {
+      if (mapInstance) {
+        try {
+          // Get container before removing the map
+          const container = mapInstance.getContainer();
+          
+          // Remove the map instance
+          mapInstance.off(); // Remove all event listeners first
+          mapInstance.remove(); // Then remove the map
+          
+          // Leaflet leaves a reference on the container element that causes
+          // "Map container is being reused by another instance" if the
+          // component is remounted very quickly (e.g. when moving panels or
+          // under React 18 strict-mode double mounts). Removing or deleting
+          // that property ensures the next initialisation starts cleanly.
+          if (container && container.parentNode && (container as any)._leaflet_id !== undefined) {
+            try {
+              delete (container as any)._leaflet_id;
+            } catch {
+              (container as any)._leaflet_id = undefined;
+            }
+          }
+        } catch (error) {
+          console.warn('Error cleaning up map instance:', error);
+        }
+      }
+    };
+  }, [mapInstance]);
+
+  // If the container layout changes, invalidate map size to ensure correct rendering
+  useEffect(() => {
+    if (mapInstance) {
+      // Give the browser a tick to finish layout changes before invalidating
+      const timeout = setTimeout(() => {
+        try {
+          mapInstance.invalidateSize();
+        } catch (error) {
+          console.warn('Error invalidating map size:', error);
+        }
+      }, 50);
+      return () => clearTimeout(timeout);
+    }
+  }, [mapInstance]);
 
   const getRegionStatusColor = (region: Region) => {
     const deforestation = region.lastDeforestationPercentage || 0;
@@ -284,56 +349,71 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
   };
 
   const renderModernRadiusCircles = (region: Region) => {
-    const color = getRegionStatusColor(region);
-    const center: [number, number] = [region.latitude, region.longitude];
-    const radius = region.radiusKm * 1000; // Convert km to meters
-    
-    return (
-      <div key={`circles-${region.id}`}>
-        {/* Outer detection perimeter */}
-        <Circle
-          center={center}
-          radius={radius}
-          pathOptions={{
-            color: color,
-            fillColor: color,
-            fillOpacity: 0.05,
-            weight: 2,
-            opacity: 0.8,
-            dashArray: '10, 5',
-          }}
-        />
-        
-        {/* Middle monitoring zone */}
-        <Circle
-          center={center}
-          radius={radius * 0.7}
-          pathOptions={{
-            color: color,
-            fillColor: color,
-            fillOpacity: 0.1,
-            weight: 1.5,
-            opacity: 0.6,
-            dashArray: '5, 5',
-          }}
-        />
-        
-        {/* Inner core zone */}
-        <Circle
-          center={center}
-          radius={radius * 0.4}
-          pathOptions={{
-            color: color,
-            fillColor: color,
-            fillOpacity: 0.15,
-            weight: 1,
-            opacity: 0.9,
-          }}
-        />
-        
+    // Defensive checks to prevent geometry errors
+    if (!region || typeof region.latitude !== 'number' || typeof region.longitude !== 'number' || typeof region.radiusKm !== 'number') {
+      console.warn('Invalid region data for rendering circles:', region);
+      return null;
+    }
 
-      </div>
-    );
+    if (!mapInstance) {
+      return null;
+    }
+
+    try {
+      const color = getRegionStatusColor(region);
+      const center: [number, number] = [region.latitude, region.longitude];
+      const radius = region.radiusKm * 1000; // Convert km to meters
+      
+      return (
+        <div key={`circles-${region.id}`}>
+          {/* Outer detection perimeter */}
+          <Circle
+            center={center}
+            radius={radius}
+            pathOptions={{
+              color: color,
+              fillColor: color,
+              fillOpacity: 0.05,
+              weight: 2,
+              opacity: 0.8,
+              dashArray: '10, 5',
+            }}
+          />
+          
+          {/* Middle monitoring zone */}
+          <Circle
+            center={center}
+            radius={radius * 0.7}
+            pathOptions={{
+              color: color,
+              fillColor: color,
+              fillOpacity: 0.1,
+              weight: 1.5,
+              opacity: 0.6,
+              dashArray: '5, 5',
+            }}
+          />
+          
+          {/* Inner core zone */}
+          <Circle
+            center={center}
+            radius={radius * 0.4}
+            pathOptions={{
+              color: color,
+              fillColor: color,
+              fillOpacity: 0.15,
+              weight: 1,
+              opacity: 0.9,
+            }}
+          />
+          
+
+        </div>
+      );
+    } catch (error) {
+      console.warn('Error rendering region circles:', error, region);
+      return null;
+    }
   };
   
   return (
@@ -344,7 +424,7 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
           background: ${isSatelliteView ? '#0a0a0a' : '#f8f9fa'} !important;
         }
 
-        /* Override Leaflet popup styling for square design */
+        /* Override Leaflet popup styling for square design */}
         .leaflet-popup-content-wrapper {
           border-radius: 0 !important;
           padding: 0 !important;
@@ -367,6 +447,7 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
       `}</style>
 
       <MapContainer 
+        key={mapKey}
         ref={setMapInstance}
         center={defaultCenter} 
         zoom={6} 
@@ -397,6 +478,8 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
 
         <MapEvents isHeatmapVisible={isHeatmapVisible} onDataFetched={setHeatmapPoints} onError={onError} />
 
+        <MapDeselectHandler onRegionDeselected={onRegionDeselected} isCreating={isCreating} />
+
         <DragCreateHandler 
           onRegionCreated={onRegionCreated}
           isCreating={isCreating}
@@ -404,91 +487,126 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
           onError={onError}
         />
 
-        {regions.map(region => (
-          <div key={region.id}>
-            <Marker 
-              position={[region.latitude, region.longitude]}
-              icon={createRegionIcon(region.status, region.lastDeforestationPercentage)}
-              eventHandlers={{
-                click: () => onRegionSelected(region),
-              }}
-            >
-              <Popup>
-                <div className={`min-w-[280px] ${isSatelliteView ? 'bg-gray-900 border border-gray-700' : 'bg-white border border-gray-200'} shadow-xl`}>
-                  {/* Header Section */}
-                  <div className={`px-4 py-3 border-b ${isSatelliteView ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-gray-50'}`}>
-                    <div className="flex items-center justify-between">
-                      <h3 className={`font-semibold text-sm ${isSatelliteView ? 'text-white' : 'text-gray-900'}`}>
-                        FOREST REGION
-                      </h3>
-                      <div className={`px-2 py-1 text-xs font-medium rounded ${
-                        region.status === 'ACTIVE' ? 'bg-green-100 text-green-800' :
-                        region.status === 'PAUSED' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-blue-100 text-blue-800'
-                      }`}>
-                        {region.status}
-                      </div>
-                    </div>
-                    <h4 className={`font-bold text-base mt-1 ${isSatelliteView ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                      {region.name}
-                    </h4>
-                  </div>
+        {regions.map(region => {
+          // Defensive check for valid region data
+          if (!region || !region.id || typeof region.latitude !== 'number' || typeof region.longitude !== 'number') {
+            console.warn('Skipping invalid region:', region);
+            return null;
+          }
 
-                  {/* Content Section */}
-                  <div className="px-4 py-3">
-                    <p className={`text-sm mb-4 ${isSatelliteView ? 'text-gray-300' : 'text-gray-600'}`}>
-                      {region.description}
-                    </p>
-
-                    {/* Metrics Grid */}
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className={`p-3 ${isSatelliteView ? 'bg-gray-800 border border-gray-700' : 'bg-gray-50 border border-gray-200'}`}>
-                        <div className={`text-xs font-medium ${isSatelliteView ? 'text-gray-400' : 'text-gray-500'}`}>
-                          MONITORING RADIUS
-                        </div>
-                        <div className={`text-lg font-bold ${isSatelliteView ? 'text-white' : 'text-gray-900'}`}>
-                          {region.radiusKm} km
-                        </div>
-                      </div>
-
-                      <div className={`p-3 ${isSatelliteView ? 'bg-gray-800 border border-gray-700' : 'bg-gray-50 border border-gray-200'}`}>
-                        <div className={`text-xs font-medium ${isSatelliteView ? 'text-gray-400' : 'text-gray-500'}`}>
-                          DEFORESTATION RISK
-                        </div>
-                        <div className={`text-lg font-bold ${
-                          (region.lastDeforestationPercentage || 0) > 15 ? 'text-red-500' :
-                          (region.lastDeforestationPercentage || 0) > 8 ? 'text-yellow-500' :
-                          'text-green-500'
+          try {
+            const isSelected = selectedRegion?.id === region.id;
+            
+            return (
+              <div key={region.id}>
+                <Marker 
+                  position={[region.latitude, region.longitude]}
+                  icon={createRegionIcon(region.status, region.lastDeforestationPercentage)}
+                  eventHandlers={{
+                    click: () => onRegionSelected(region),
+                  }}
+                >
+                  <Popup>
+                    <div className={`min-w-[280px] ${isSatelliteView ? 'bg-gray-900 border border-gray-700' : 'bg-white border border-gray-200'} shadow-xl`}>
+                    {/* Header Section */}
+                    <div className={`px-4 py-3 border-b ${isSatelliteView ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-gray-50'}`}>
+                      <div className="flex items-center justify-between">
+                        <h3 className={`font-semibold text-sm ${isSatelliteView ? 'text-white' : 'text-gray-900'}`}>
+                          FOREST REGION
+                        </h3>
+                        <div className={`px-2 py-1 text-xs font-medium rounded ${
+                          region.status === 'ACTIVE' ? 'bg-green-100 text-green-800' :
+                          region.status === 'PAUSED' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-blue-100 text-blue-800'
                         }`}>
-                          {region.lastDeforestationPercentage?.toFixed(1) ?? 'N/A'}%
+                          {region.status}
                         </div>
                       </div>
+                      <h4 className={`font-bold text-base mt-1 ${isSatelliteView ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                        {region.name}
+                      </h4>
                     </div>
 
-                    {/* Last Analysis */}
-                    {region.lastAnalysis && (
-                      <div className={`mt-4 pt-3 border-t ${isSatelliteView ? 'border-gray-700' : 'border-gray-200'}`}>
-                        <div className={`text-xs font-medium ${isSatelliteView ? 'text-gray-400' : 'text-gray-500'}`}>
-                          LAST ANALYSIS
+                    {/* Content Section */}
+                    <div className="px-4 py-3">
+                      <p className={`text-sm mb-4 ${isSatelliteView ? 'text-gray-300' : 'text-gray-600'}`}>
+                        {region.description}
+                      </p>
+
+                      {/* Metrics Grid */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className={`p-3 ${isSatelliteView ? 'bg-gray-800 border border-gray-700' : 'bg-gray-50 border border-gray-200'}`}>
+                          <div className={`text-xs font-medium ${isSatelliteView ? 'text-gray-400' : 'text-gray-500'}`}>
+                            MONITORING RADIUS
+                          </div>
+                          <div className={`text-lg font-bold ${isSatelliteView ? 'text-white' : 'text-gray-900'}`}>
+                            {region.radiusKm} km
+                          </div>
                         </div>
-                        <div className={`text-sm ${isSatelliteView ? 'text-gray-300' : 'text-gray-700'}`}>
-                          {new Date(region.lastAnalysis).toLocaleDateString('en-US', {
-                            year: 'numeric',
-                            month: 'short',
-                            day: 'numeric'
-                          })}
+
+                        <div className={`p-3 ${isSatelliteView ? 'bg-gray-800 border border-gray-700' : 'bg-gray-50 border border-gray-200'}`}>
+                          <div className={`text-xs font-medium ${isSatelliteView ? 'text-gray-400' : 'text-gray-500'}`}>
+                            DEFORESTATION RISK
+                          </div>
+                          <div className={`text-lg font-bold ${
+                            (region.lastDeforestationPercentage || 0) > 15 ? 'text-red-500' :
+                            (region.lastDeforestationPercentage || 0) > 8 ? 'text-yellow-500' :
+                            'text-green-500'
+                          }`}>
+                            {region.lastDeforestationPercentage?.toFixed(1) ?? 'N/A'}%
+                          </div>
                         </div>
                       </div>
-                    )}
-                  </div>
-                </div>
-              </Popup>
-            </Marker>
 
-            {/* Modern radius visualization */}
-            {renderModernRadiusCircles(region)}
-          </div>
-        ))}
+                      {/* Last Analysis */}
+                      {region.lastAnalysis && (
+                        <div className={`mt-4 pt-3 border-t ${isSatelliteView ? 'border-gray-700' : 'border-gray-200'}`}>
+                          <div className={`text-xs font-medium ${isSatelliteView ? 'text-gray-400' : 'text-gray-500'}`}>
+                            LAST ANALYSIS
+                          </div>
+                          <div className={`text-sm ${isSatelliteView ? 'text-gray-300' : 'text-gray-700'}`}>
+                            {new Date(region.lastAnalysis).toLocaleDateString('en-US', {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric'
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    {/* Closing popup content wrapper */}
+                    </div>
+                  </Popup>
+                </Marker>
+
+                {/* Modern radius visualization with selection indicator */}
+                {isSelected ? (
+                  // Selected region - add highlight
+                  <>
+                    {renderModernRadiusCircles(region)}
+                    <Circle
+                      center={[region.latitude, region.longitude]}
+                      radius={region.radiusKm * 1000 * 1.1} // Slightly larger outer ring
+                      pathOptions={{
+                        color: '#0972d3',
+                        fillColor: 'transparent',
+                        fillOpacity: 0,
+                        weight: 4,
+                        opacity: 1,
+                        dashArray: '5, 5',
+                      }}
+                    />
+                  </>
+                ) : (
+                  renderModernRadiusCircles(region)
+                )}
+              </div>
+            );
+          } catch (error) {
+            console.warn('Error rendering region:', error, region);
+            return null;
+          }
+        }).filter(Boolean)}
 
       </MapContainer>
     </div>

@@ -10,6 +10,7 @@ interface RegionDetailsPanelProps {
   region: Region | null;
   onRegionUpdated: (region: Region) => void;
   onRegionDeleted: (regionId: string) => void;
+  onRegionDeselected: () => void;
   onError: (error: string) => void;
 }
 
@@ -17,6 +18,7 @@ export default function RegionDetailsPanel({
   region,
   onRegionUpdated,
   onRegionDeleted,
+  onRegionDeselected,
   onError
 }: RegionDetailsPanelProps) {
   const [editingRegion, setEditingRegion] = useState<Region | null>(null);
@@ -26,7 +28,24 @@ export default function RegionDetailsPanel({
     setEditingRegion(region ? { ...region } : null);
   }, [region]);
 
-  if (!region || !editingRegion) return null;
+  if (!region || !editingRegion) {
+    return (
+      <div className="flex items-center justify-center h-full bg-[#f2f3f3]">
+        <div className="text-center p-8">
+          <div className="w-16 h-16 bg-[#232f3e] text-white text-2xl font-bold flex items-center justify-center mb-4 mx-auto" style={{ borderRadius: '2px' }}>
+            DTL
+          </div>
+          <h3 className="text-lg font-semibold text-[#0f1419] mb-2">No Region Selected</h3>
+          <p className="text-[#687078] mb-4">Select a region from the map to view and edit its details.</p>
+          <div className="text-sm text-[#687078]">
+            <div>• View monitoring status</div>
+            <div>• Edit region settings</div>
+            <div>• Trigger analysis</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const handleUpdateRegion = async () => {
     if (!editingRegion) return;
@@ -127,6 +146,19 @@ export default function RegionDetailsPanel({
 
   return (
     <div className="overflow-y-scroll p-6 space-y-6 h-full">
+      {/* Header with deselect button */}
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold text-[#0f1419]">Region Details</h2>
+        <Button
+          onClick={onRegionDeselected}
+          variant="outline"
+          size="sm"
+          className="text-xs"
+        >
+          Deselect
+        </Button>
+      </div>
+
       {/* Status Overview */}
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-gray-50 rounded-lg p-4">

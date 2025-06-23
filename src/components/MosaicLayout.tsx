@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { Mosaic, MosaicWindow } from 'react-mosaic-component';
+import { useState, useEffect, useRef, useContext } from 'react';
+import { Mosaic, MosaicWindow, MosaicContext, MosaicNode } from 'react-mosaic-component';
 import 'react-mosaic-component/react-mosaic-component.css';
 import '@blueprintjs/core/lib/css/blueprint.css';
 import '@blueprintjs/icons/lib/css/blueprint-icons.css';
+import { X, Settings, ChevronDown } from 'lucide-react';
 import { Region, api } from '../lib/api';
 import MosaicMap, { LeafletMap } from './MosaicMap';
 import RegionDetailsPanel from './RegionDetailsPanel';
@@ -13,8 +14,11 @@ import AlertsPanel from './AlertsPanel';
 import ActiveJobsPanel from './ActiveJobsPanel';
 import SettingsPanel from './SettingsPanel';
 import DashboardStatsPanel from './DashboardStatsPanel';
+import ActivityFeed from './ActivityFeed';
+import SystemHealthPanel from './SystemHealthPanel';
+import LogsPanel from './LogsPanel';
 
-type ViewId = 'map' | 'details' | 'alerts' | 'jobs' | 'settings';
+type ViewId = 'map' | 'details' | 'alerts' | 'jobs' | 'settings' | 'activity' | 'health' | 'logs';
 
 const TITLE_MAP: Record<ViewId, string> = {
   map: 'FOREST MONITORING MAP',
@@ -22,6 +26,20 @@ const TITLE_MAP: Record<ViewId, string> = {
   alerts: 'ACTIVE ALERTS',
   jobs: 'ACTIVE ANALYSIS JOBS',
   settings: 'NOTIFICATION SETTINGS',
+  activity: 'ACTIVITY FEED',
+  health: 'SYSTEM HEALTH',
+  logs: 'SYSTEM LOGS',
+};
+
+const ICON_MAP: Record<ViewId, string> = {
+  map: 'MAP',
+  details: 'DTL',
+  alerts: 'ALT',
+  jobs: 'JOB',
+  settings: 'SET',
+  activity: 'ACT',
+  health: 'HLT',
+  logs: 'LOG',
 };
 
 export default function MosaicLayout() {
@@ -32,6 +50,47 @@ export default function MosaicLayout() {
   const [isCreating, setIsCreating] = useState(false);
   const [isSatelliteView, setIsSatelliteView] = useState(false);
   const mapRef = useRef<LeafletMap>(null);
+  
+  // State for managing window visibility and mosaic layout
+  const [currentValue, setCurrentValue] = useState<MosaicNode<ViewId> | null>({
+    direction: 'row',
+    first: {
+      direction: 'column',
+      first: 'details',
+      second: 'health',
+      splitPercentage: 60,
+    },
+    second: {
+      direction: 'column',
+      first: 'map',
+      second: {
+        direction: 'row',
+        first: {
+          direction: 'column',
+          first: 'alerts',
+          second: 'activity',
+          splitPercentage: 50,
+        },
+        second: {
+          direction: 'column',
+          first: 'jobs',
+          second: {
+            direction: 'row',
+            first: 'settings',
+            second: 'logs',
+            splitPercentage: 50,
+          },
+          splitPercentage: 40,
+        },
+        splitPercentage: 50,
+      },
+      splitPercentage: 65,
+    },
+    splitPercentage: 25,
+  });
+  
+  const [hiddenViews, setHiddenViews] = useState<Set<ViewId>>(new Set());
+  const [isWindowMenuOpen, setIsWindowMenuOpen] = useState(false);
 
   // Load regions on initial mount
   useEffect(() => {
@@ -71,6 +130,10 @@ export default function MosaicLayout() {
     setSelectedRegion(region);
   };
 
+  const handleRegionDeselected = () => {
+    setSelectedRegion(null);
+  };
+
   const handleRegionUpdated = (updatedRegion: Region) => {
     setSelectedRegion(updatedRegion);
     setRegions(prev => prev.map(r => r.id === updatedRegion.id ? updatedRegion : r));
@@ -90,31 +153,98 @@ export default function MosaicLayout() {
     setError(errorMessage);
   };
 
-  const renderTile = (id: ViewId) => {
+  // Functions to handle window management
+  const hideWindow = (viewId: ViewId) => {
+    setHiddenViews(prev => new Set([...prev, viewId]));
+  };
+
+  const showWindow = (viewId: ViewId) => {
+    setHiddenViews(prev => {
+      const newSet = new Set([...prev]);
+      newSet.delete(viewId);
+      return newSet;
+    });
+  };
+
+  const toggleWindowVisibility = (viewId: ViewId) => {
+    if (hiddenViews.has(viewId)) {
+      showWindow(viewId);
+    } else {
+      hideWindow(viewId);
+    }
+  };
+
+  // Custom toolbar controls for each window
+  const createCustomToolbarControls = (viewId: ViewId) => {
+    return (
+      <div className="flex items-center gap-2 left-4 relative">
+        <button
+          onClick={() => hideWindow(viewId)}
+          title="Hide this panel"
+          className="mt-0.5"
+        >
+          <X size={12} />
+        </button>
+      </div>
+    );
+  };
+
+  // Function to filter out hidden views from the mosaic tree
+  const filterHiddenViews = (node: MosaicNode<ViewId> | null): MosaicNode<ViewId> | null => {
+    if (!node) return null;
+    
+    if (typeof node === 'string') {
+      return hiddenViews.has(node) ? null : node;
+    }
+    
+    const first = filterHiddenViews(node.first);
+    const second = filterHiddenViews(node.second);
+    
+    if (!first && !second) return null;
+    if (!first) return second;
+    if (!second) return first;
+    
+    return {
+      ...node,
+      first,
+      second,
+    };
+  };
+
+  const filteredValue = filterHiddenViews(currentValue);
+
+  const renderTile = (id: ViewId, path: any) => {
+    const customControls = id === 'map' ? (
+      <div className="flex items-center gap-2">
+        <MapToolbar
+          onToggleHeatmap={handleToggleHeatmap}
+          isHeatmapVisible={isHeatmapVisible}
+          onToggleCreate={handleToggleCreate}
+          isCreating={isCreating}
+          isSatelliteView={isSatelliteView}
+          onToggleSatellite={handleToggleSatellite}
+          onZoomIn={() => mapRef.current?.zoomIn()}
+          onZoomOut={() => mapRef.current?.zoomOut()}
+          onResetView={() => mapRef.current?.setView([-6.0, -53.0], 6)}
+          regionCount={regions.length}
+        />
+        {createCustomToolbarControls(id)}
+      </div>
+    ) : createCustomToolbarControls(id);
+
     switch (id) {
       case 'map':
         return (
           <MosaicWindow
-            path={[]}
+            path={path}
             title={TITLE_MAP[id]}
-            toolbarControls={
-              <MapToolbar
-                onToggleHeatmap={handleToggleHeatmap}
-                isHeatmapVisible={isHeatmapVisible}
-                onToggleCreate={handleToggleCreate}
-                isCreating={isCreating}
-                isSatelliteView={isSatelliteView}
-                onToggleSatellite={handleToggleSatellite}
-                onZoomIn={() => mapRef.current?.zoomIn()}
-                onZoomOut={() => mapRef.current?.zoomOut()}
-                onResetView={() => mapRef.current?.setView([-6.0, -53.0], 6)}
-                regionCount={regions.length}
-              />
-            }
+            toolbarControls={customControls}
+            createNode={() => 'map'}
           >
             <MosaicMap
               ref={mapRef}
               onRegionSelected={handleRegionSelected}
+              onRegionDeselected={handleRegionDeselected}
               onError={handleError}
               isHeatmapVisible={isHeatmapVisible}
               isSatelliteView={isSatelliteView}
@@ -122,36 +252,56 @@ export default function MosaicLayout() {
               setIsCreating={setIsCreating}
               onRegionCreated={handleRegionCreated}
               regions={regions}
+              selectedRegion={selectedRegion}
             />
           </MosaicWindow>
         );
       case 'details':
         return (
-          <MosaicWindow path={[]} title={TITLE_MAP[id]} toolbarControls={<div></div>}>
+          <MosaicWindow path={path} title={TITLE_MAP[id]} toolbarControls={customControls} createNode={() => 'details'}>
             <RegionDetailsPanel
               region={selectedRegion}
               onRegionUpdated={handleRegionUpdated}
               onRegionDeleted={handleRegionDeleted}
+              onRegionDeselected={handleRegionDeselected}
               onError={handleError}
             />
           </MosaicWindow>
         );
       case 'alerts':
         return (
-          <MosaicWindow path={[]} title={TITLE_MAP[id]} toolbarControls={<div></div>}>
+          <MosaicWindow path={path} title={TITLE_MAP[id]} toolbarControls={customControls} createNode={() => 'alerts'}>
             <AlertsPanel />
           </MosaicWindow>
         );
       case 'jobs':
         return (
-          <MosaicWindow path={[]} title={TITLE_MAP[id]} toolbarControls={<div></div>}>
+          <MosaicWindow path={path} title={TITLE_MAP[id]} toolbarControls={customControls} createNode={() => 'jobs'}>
             <ActiveJobsPanel />
           </MosaicWindow>
         );
       case 'settings':
         return (
-          <MosaicWindow path={[]} title={TITLE_MAP[id]} toolbarControls={<div></div>}>
+          <MosaicWindow path={path} title={TITLE_MAP[id]} toolbarControls={customControls} createNode={() => 'settings'}>
             <SettingsPanel onError={handleError} />
+          </MosaicWindow>
+        );
+      case 'activity':
+        return (
+          <MosaicWindow path={path} title={TITLE_MAP[id]} toolbarControls={customControls} createNode={() => 'activity'}>
+            <ActivityFeed />
+          </MosaicWindow>
+        );
+      case 'health':
+        return (
+          <MosaicWindow path={path} title={TITLE_MAP[id]} toolbarControls={customControls} createNode={() => 'health'}>
+            <SystemHealthPanel />
+          </MosaicWindow>
+        );
+      case 'logs':
+        return (
+          <MosaicWindow path={path} title={TITLE_MAP[id]} toolbarControls={customControls} createNode={() => 'logs'}>
+            <LogsPanel />
           </MosaicWindow>
         );
       default:
@@ -161,6 +311,107 @@ export default function MosaicLayout() {
 
   return (
     <div className="relative h-screen flex flex-col">
+      {/* Top Navigation Bar */}
+      <div className="bg-[#232f3e] text-white px-4 py-2 flex items-center justify-between border-b border-[#3c4043] relative z-50">
+        <div className="flex items-center gap-4">
+          <h1 className="text-lg font-semibold">ForestShield Dashboard</h1>
+          <div className="text-sm text-gray-300">
+            {Object.keys(TITLE_MAP).length - hiddenViews.size} of {Object.keys(TITLE_MAP).length} panels visible
+          </div>
+        </div>
+        
+        {/* Window Management Dropdown */}
+        <div className="relative">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsWindowMenuOpen(!isWindowMenuOpen);
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 bg-[#0972d3] hover:bg-[#0558a5] transition-colors border border-[#0558a5] text-sm font-medium"
+            style={{ borderRadius: '2px' }}
+          >
+            <Settings size={14} />
+            <span>Manage Panels</span>
+            <ChevronDown size={14} className={`transform transition-transform ${isWindowMenuOpen ? 'rotate-180' : ''}`} />
+          </button>
+          
+          {isWindowMenuOpen && (
+            <>
+              {/* Click outside to close dropdown */}
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => setIsWindowMenuOpen(false)}
+              />
+              <div 
+                className="absolute right-0 top-full mt-1 bg-white border border-[#d5dbdb] shadow-lg min-w-[320px] z-50"
+                style={{ 
+                  borderRadius: '2px',
+                  boxShadow: '0 1px 1px 0 rgba(0, 28, 36, 0.3), 0 4px 8px 0 rgba(0, 28, 36, 0.15)'
+                }}
+              >
+                <div className="p-4 border-b border-[#d5dbdb] bg-[#f2f3f3]">
+                  <h3 className="font-semibold text-[#0f1419] text-sm mb-1">Panel Management</h3>
+                  <p className="text-xs text-[#687078]">Show or hide dashboard panels</p>
+                </div>
+                <div className="max-h-80 overflow-y-auto">
+                  {Object.entries(TITLE_MAP).map(([viewId, title]) => (
+                    <div
+                      key={viewId}
+                      className="flex items-center justify-between p-3 hover:bg-[#f2f3f3] border-b border-[#eaeded] last:border-b-0 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-[#232f3e] text-white text-xs font-bold flex items-center justify-center" style={{ borderRadius: '2px' }}>
+                          {ICON_MAP[viewId as ViewId]}
+                        </div>
+                        <div>
+                          <div className="font-medium text-sm text-[#0f1419]">{title}</div>
+                          <div className="text-xs text-[#687078]">
+                            {hiddenViews.has(viewId as ViewId) ? 'Hidden' : 'Visible'}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={!hiddenViews.has(viewId as ViewId)}
+                          onChange={() => toggleWindowVisibility(viewId as ViewId)}
+                          className="w-4 h-4 text-[#0972d3] bg-white border-[#d5dbdb] focus:ring-[#0972d3] focus:ring-2 cursor-pointer"
+                          style={{ borderRadius: '2px' }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="p-3 border-t border-[#d5dbdb] bg-[#f2f3f3]">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        setHiddenViews(new Set());
+                        setIsWindowMenuOpen(false);
+                      }}
+                      className="flex-1 px-3 py-1.5 bg-[#0972d3] text-white text-xs font-medium hover:bg-[#0558a5] transition-colors border border-[#0558a5]"
+                      style={{ borderRadius: '2px' }}
+                    >
+                      Show All
+                    </button>
+                    <button
+                      onClick={() => {
+                        setHiddenViews(new Set(Object.keys(TITLE_MAP) as ViewId[]));
+                        setIsWindowMenuOpen(false);
+                      }}
+                      className="flex-1 px-3 py-1.5 bg-[#f2f3f3] text-[#0f1419] text-xs font-medium hover:bg-[#e9ecef] transition-colors border border-[#d5dbdb]"
+                      style={{ borderRadius: '2px' }}
+                    >
+                      Hide All
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
       {/* AWS-style custom CSS */}
       <style jsx global>{`
         /* AWS-style mosaic theme overrides */
@@ -173,11 +424,19 @@ export default function MosaicLayout() {
           font-weight: 600 !important;
           letter-spacing: 0.5px !important;
           text-transform: uppercase !important;
+          user-select: none !important;
+          -webkit-user-select: none !important;
+          -moz-user-select: none !important;
+          -ms-user-select: none !important;
         }
         
         .mosaic-blueprint-theme .mosaic-window-title {
           color: #ffffff !important;
           font-family: 'Amazon Ember', 'Helvetica Neue', sans-serif !important;
+          user-select: none !important;
+          -webkit-user-select: none !important;
+          -moz-user-select: none !important;
+          -ms-user-select: none !important;
         }
         
         .mosaic-blueprint-theme .mosaic-window-body {
@@ -604,31 +863,31 @@ export default function MosaicLayout() {
 
       {/* Mosaic Layout */}
       <div className="flex-1">
-        <Mosaic<ViewId>
-          renderTile={renderTile}
-          initialValue={{
-            direction: 'row',
-            first: 'details',
-            second: {
-              direction: 'column',
-              first: 'map',
-              second: {
-                direction: 'row',
-                first: 'alerts',
-                second: {
-                  direction: 'row',
-                  first: 'jobs',
-                  second: 'settings',
-                  splitPercentage: 50,
-                },
-                splitPercentage: 33.33,
-              },
-              splitPercentage: 75,
-            },
-            splitPercentage: 25,
-          }}
-          className="mosaic-blueprint-theme"
-        />
+        {filteredValue ? (
+          <Mosaic<ViewId>
+            renderTile={renderTile}
+            value={filteredValue}
+            onChange={setCurrentValue}
+            className="mosaic-blueprint-theme"
+          />
+        ) : (
+          <div className="flex items-center justify-center h-full bg-[#f2f3f3]">
+            <div className="text-center">
+              <div className="w-16 h-16 bg-[#232f3e] text-white text-2xl font-bold flex items-center justify-center mb-4 mx-auto" style={{ borderRadius: '2px' }}>
+                SET
+              </div>
+              <h2 className="text-xl font-semibold text-[#0f1419] mb-2">No Panels Visible</h2>
+              <p className="text-[#687078] mb-4">All dashboard panels are currently hidden.</p>
+              <button
+                onClick={() => setIsWindowMenuOpen(true)}
+                className="px-4 py-2 bg-[#0972d3] text-white font-medium hover:bg-[#0558a5] transition-colors border border-[#0558a5]"
+                style={{ borderRadius: '2px' }}
+              >
+                Manage Panels
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
