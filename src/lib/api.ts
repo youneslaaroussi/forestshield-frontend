@@ -72,6 +72,21 @@ export interface ActiveJob {
   processedImages: number;
 }
 
+export interface AlertSubscription {
+  email: string;
+  subscriptionArn: string;
+  status: 'PendingConfirmation' | 'Confirmed' | 'Deleted';
+}
+
+export interface AlertSubscriptionsResponse {
+  subscriptions: AlertSubscription[];
+}
+
+export interface SubscribeResponse {
+  message: string;
+  subscriptionArn: string;
+}
+
 // API Client functions
 export const api = {
   // Dashboard endpoints
@@ -163,13 +178,51 @@ export const api = {
     return response.json();
   },
 
-  async triggerAnalysis(regionId: string): Promise<{ message: string; jobId: string }> {
+  async triggerAnalysis(
+    latitude: number,
+    longitude: number,
+    startDate: string,
+    endDate: string,
+    cloudCover: number
+  ): Promise<{ message: string; jobId: string }> {
     const response = await fetch(`${API_BASE_URL}/sentinel/step-functions/trigger`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ regionId }),
+      body: JSON.stringify({
+        searchParams: {
+          latitude,
+          longitude,
+          startDate,
+          endDate,
+          cloudCover
+        }
+      }),
     });
     if (!response.ok) throw new Error('Failed to trigger analysis');
     return response.json();
+  },
+
+  // Alert subscription endpoints
+  async getAlertSubscriptions(): Promise<AlertSubscriptionsResponse> {
+    const response = await fetch(`${API_BASE_URL}/dashboard/alerts/subscriptions`);
+    if (!response.ok) throw new Error('Failed to fetch alert subscriptions');
+    return response.json();
+  },
+
+  async subscribeToAlerts(email: string): Promise<SubscribeResponse> {
+    const response = await fetch(`${API_BASE_URL}/dashboard/alerts/subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    if (!response.ok) throw new Error('Failed to subscribe to alerts');
+    return response.json();
+  },
+
+  async unsubscribeFromAlerts(email: string): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/dashboard/alerts/unsubscribe?email=${encodeURIComponent(email)}`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) throw new Error('Failed to unsubscribe from alerts');
   }
 }; 

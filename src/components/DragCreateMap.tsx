@@ -332,7 +332,21 @@ export default function DragCreateMap({ onRegionCreated }: DragCreateMapProps) {
 
     setLoading(true);
     try {
-      await api.triggerAnalysis(selectedRegion.id);
+      // Generate date range for the last 3 months
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setMonth(endDate.getMonth() - 3);
+      
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
+
+      await api.triggerAnalysis(
+        selectedRegion.latitude,
+        selectedRegion.longitude,
+        startDateStr,
+        endDateStr,
+        selectedRegion.cloudCoverThreshold
+      );
       setError(null);
       // You could show a success message here
     } catch (err) {

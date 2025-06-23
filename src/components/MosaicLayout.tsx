@@ -11,14 +11,17 @@ import RegionDetailsPanel from './RegionDetailsPanel';
 import MapToolbar from './MapToolbar';
 import AlertsPanel from './AlertsPanel';
 import ActiveJobsPanel from './ActiveJobsPanel';
+import SettingsPanel from './SettingsPanel';
+import DashboardStatsPanel from './DashboardStatsPanel';
 
-type ViewId = 'map' | 'details' | 'alerts' | 'jobs';
+type ViewId = 'map' | 'details' | 'alerts' | 'jobs' | 'settings';
 
 const TITLE_MAP: Record<ViewId, string> = {
   map: 'FOREST MONITORING MAP',
   details: 'REGION DETAILS',
   alerts: 'ACTIVE ALERTS',
   jobs: 'ACTIVE ANALYSIS JOBS',
+  settings: 'NOTIFICATION SETTINGS',
 };
 
 export default function MosaicLayout() {
@@ -145,13 +148,19 @@ export default function MosaicLayout() {
             <ActiveJobsPanel />
           </MosaicWindow>
         );
+      case 'settings':
+        return (
+          <MosaicWindow path={[]} title={TITLE_MAP[id]} toolbarControls={<div></div>}>
+            <SettingsPanel onError={handleError} />
+          </MosaicWindow>
+        );
       default:
         return <div>Unknown view</div>;
     }
   };
 
   return (
-    <div className="relative h-screen">
+    <div className="relative h-screen flex flex-col">
       {/* AWS-style custom CSS */}
       <style jsx global>{`
         /* AWS-style mosaic theme overrides */
@@ -466,6 +475,106 @@ export default function MosaicLayout() {
           border: 1px solid #aed6f1 !important;
           color: #0972d3 !important;
         }
+
+        /* AWS-style Scrollbars */
+        ::-webkit-scrollbar {
+          width: 12px !important;
+          height: 12px !important;
+        }
+
+        ::-webkit-scrollbar-track {
+          background: #f2f3f3 !important;
+          border-radius: 2px !important;
+        }
+
+        ::-webkit-scrollbar-thumb {
+          background: #aab7b8 !important;
+          border-radius: 2px !important;
+          border: 2px solid #f2f3f3 !important;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+          background: #879596 !important;
+        }
+
+        ::-webkit-scrollbar-thumb:active {
+          background: #687078 !important;
+        }
+
+        ::-webkit-scrollbar-corner {
+          background: #f2f3f3 !important;
+        }
+
+        /* Firefox scrollbar styling */
+        html {
+          scrollbar-width: thin !important;
+          scrollbar-color: #aab7b8 #f2f3f3 !important;
+        }
+
+        /* Custom AWS-style Card styling overrides */
+        [data-slot="card"] {
+          background: #ffffff !important;
+          border: 1px solid #d5dbdb !important;
+          border-radius: 2px !important;
+          box-shadow: 0 1px 1px 0 rgba(0, 28, 36, 0.3), 0 1px 3px 0 rgba(0, 28, 36, 0.15) !important;
+          transition: box-shadow 0.15s ease-in-out !important;
+        }
+
+        [data-slot="card"]:hover {
+          box-shadow: 0 2px 4px 0 rgba(0, 28, 36, 0.15), 0 4px 8px 0 rgba(0, 28, 36, 0.1) !important;
+        }
+
+        /* AWS-style Card borders for different states */
+        [data-slot="card"].border-success {
+          border-color: #037f0c !important;
+          border-left-width: 4px !important;
+        }
+
+        [data-slot="card"].border-warning {
+          border-color: #8d6e00 !important;
+          border-left-width: 4px !important;
+        }
+
+        [data-slot="card"].border-error {
+          border-color: #d13212 !important;
+          border-left-width: 4px !important;
+        }
+
+        [data-slot="card"].border-info {
+          border-color: #0972d3 !important;
+          border-left-width: 4px !important;
+        }
+
+        /* AWS-style status badges */
+        .status-badge {
+          display: inline-flex !important;
+          align-items: center !important;
+          gap: 4px !important;
+          padding: 2px 8px !important;
+          border-radius: 12px !important;
+          font-size: 11px !important;
+          font-weight: 600 !important;
+          text-transform: uppercase !important;
+          letter-spacing: 0.5px !important;
+        }
+
+        .status-badge.verified {
+          background: #d4edda !important;
+          color: #037f0c !important;
+          border: 1px solid #c3e6cb !important;
+        }
+
+        .status-badge.pending {
+          background: #fff3cd !important;
+          color: #8d6e00 !important;
+          border: 1px solid #ffeaa7 !important;
+        }
+
+        .status-badge.error {
+          background: #f8d7da !important;
+          color: #d13212 !important;
+          border: 1px solid #f5c6cb !important;
+        }
       `}</style>
       {/* Error Message */}
       {error && (
@@ -491,27 +600,36 @@ export default function MosaicLayout() {
         </div>
       )}
 
+      <DashboardStatsPanel />
+
       {/* Mosaic Layout */}
-      <Mosaic<ViewId>
-        renderTile={renderTile}
-        initialValue={{
-          direction: 'row',
-          first: 'details',
-          second: {
-            direction: 'column',
-            first: 'map',
+      <div className="flex-1">
+        <Mosaic<ViewId>
+          renderTile={renderTile}
+          initialValue={{
+            direction: 'row',
+            first: 'details',
             second: {
+              direction: 'column',
+              first: 'map',
+              second: {
                 direction: 'row',
                 first: 'alerts',
-                second: 'jobs',
-                splitPercentage: 50,
+                second: {
+                  direction: 'row',
+                  first: 'jobs',
+                  second: 'settings',
+                  splitPercentage: 50,
+                },
+                splitPercentage: 33.33,
+              },
+              splitPercentage: 75,
             },
-            splitPercentage: 75,
-          },
-          splitPercentage: 25,
-        }}
-        className="mosaic-blueprint-theme"
-      />
+            splitPercentage: 25,
+          }}
+          className="mosaic-blueprint-theme"
+        />
+      </div>
     </div>
   );
 } 

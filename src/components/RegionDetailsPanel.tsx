@@ -85,7 +85,21 @@ export default function RegionDetailsPanel({
 
     setLoading(true);
     try {
-      await api.triggerAnalysis(editingRegion.id);
+      // Generate date range for the last 3 months
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setMonth(endDate.getMonth() - 3);
+      
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
+
+      await api.triggerAnalysis(
+        editingRegion.latitude,
+        editingRegion.longitude,
+        startDateStr,
+        endDateStr,
+        editingRegion.cloudCoverThreshold
+      );
       onError(''); // Clear any previous errors
     } catch (err) {
       console.error('Failed to trigger analysis:', err);
