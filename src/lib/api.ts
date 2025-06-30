@@ -449,7 +449,7 @@ export const api = {
 
   // Region Analysis Control endpoints
   async startRegionAnalysis(regionId: string, options?: StartAnalysisDto): Promise<RegionAnalysisControlDto> {
-    const response = await fetch(`${API_BASE_URL}/regions/${regionId}/start-analysis`, {
+    const response = await fetch(`${API_BASE_URL}/dashboard/regions/${regionId}/start-analysis`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(options || {}),
@@ -459,7 +459,7 @@ export const api = {
   },
 
   async pauseRegionAnalysis(regionId: string): Promise<RegionAnalysisControlDto> {
-    const response = await fetch(`${API_BASE_URL}/regions/${regionId}/pause-analysis`, {
+    const response = await fetch(`${API_BASE_URL}/dashboard/regions/${regionId}/pause-analysis`, {
       method: 'POST',
     });
     if (!response.ok) throw new Error('Failed to pause region analysis');
@@ -467,7 +467,7 @@ export const api = {
   },
 
   async getAnalysisSchedule(regionId: string): Promise<AnalysisScheduleDto> {
-    const response = await fetch(`${API_BASE_URL}/regions/${regionId}/analysis-schedule`);
+    const response = await fetch(`${API_BASE_URL}/dashboard/regions/${regionId}/analysis-schedule`);
     if (!response.ok) throw new Error('Failed to fetch analysis schedule');
     return response.json();
   }
