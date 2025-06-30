@@ -9,9 +9,6 @@ frontend:
         - bun install
     build:
       commands:
-        - env | grep -e LATEST_VERSION >> .env.production
-        - env | grep -e X_AWS_ACCESS_KEY_ID -e X_AWS_SECRET_ACCESS_KEY >> .env.production
-        - env | grep -e FIREBASE_PROJECT_ID -e FIREBASE_CLIENT_EMAIL -e FIREBASE_PRIVATE_KEY >> .env.production
         - bun run build
   artifacts:
     baseDirectory: .next
