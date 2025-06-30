@@ -245,6 +245,7 @@ export default function KMeansClusteringPanel({ selectedRegion }: Props) {
       <div className="bg-white border-b border-gray-200 p-4">
         <div className="flex items-center justify-between">
           <div>
+            <img src="/aws-icons/sagemaker.svg" alt="Sagemaker" className="w-12 h-12 mb-2" />
             <h3 className="text-lg font-semibold text-gray-800">K-Means Clustering Visualizations</h3>
             <p className="text-sm text-gray-600">
               Region: <strong>{selectedRegion.name}</strong>
@@ -278,7 +279,7 @@ export default function KMeansClusteringPanel({ selectedRegion }: Props) {
         <div className="flex-1 flex flex-col">
           {/* Chart Type Selector */}
           {visualizations && visualizations.visualizations.length > 1 && (
-            <div className="bg-white border-b border-gray-200 p-3">
+            <div className="bg-white border-b border-gray-200 p-3 overflow-x-auto max-w-[700px]">
               <div className="flex items-center gap-2 overflow-x-auto">
                 {visualizations.visualizations.map((chart) => {
                   const metadata = CHART_METADATA[chart.chartType as keyof typeof CHART_METADATA];

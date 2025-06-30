@@ -5,19 +5,15 @@ frontend:
       commands:
         # install bun
         - curl -fsSL https://bun.sh/install | bash
-        - export BUN_INSTALL="/root/.bun"
-        - export PATH="$BUN_INSTALL/bin:$PATH"
-        - bun install --frozen-lockfile
+        - source /root/.bashrc
+        - bun install
     build:
       commands:
-        - export BUN_INSTALL="/root/.bun"
-        - export PATH="$BUN_INSTALL/bin:$PATH"
+        - env | grep -e LATEST_VERSION >> .env.production
+        - env | grep -e X_AWS_ACCESS_KEY_ID -e X_AWS_SECRET_ACCESS_KEY >> .env.production
+        - env | grep -e FIREBASE_PROJECT_ID -e FIREBASE_CLIENT_EMAIL -e FIREBASE_PRIVATE_KEY >> .env.production
         - bun run build
   artifacts:
     baseDirectory: .next
     files:
       - '**/*'
-  cache:
-    paths:
-      - /root/.bun/install/cache
-      - .next/cache/**/*

@@ -97,7 +97,7 @@ export default function MosaicLayout() {
 
   // Panel size states for resizing
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(320);
-  const [rightSidebarWidth, setRightSidebarWidth] = useState(600);
+  const [rightSidebarWidth, setRightSidebarWidth] = useState(700);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(280);
   const [isResizing, setIsResizing] = useState<'left' | 'right' | 'bottom' | null>(null);
 
@@ -146,7 +146,7 @@ export default function MosaicLayout() {
         const newWidth = Math.max(200, Math.min(600, e.clientX));
         setLeftSidebarWidth(newWidth);
       } else if (isResizing === 'right') {
-        const newWidth = Math.max(200, Math.min(600, window.innerWidth - e.clientX));
+        const newWidth = Math.max(200, Math.min(700, window.innerWidth - e.clientX));
         setRightSidebarWidth(newWidth);
       } else if (isResizing === 'bottom') {
         const newHeight = Math.max(150, Math.min(500, window.innerHeight - e.clientY - 50));
