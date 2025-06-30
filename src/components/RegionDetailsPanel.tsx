@@ -12,6 +12,11 @@ interface RegionDetailsPanelProps {
   onRegionDeleted: (regionId: string) => void;
   onRegionDeselected: () => void;
   onError: (error: string) => void;
+  onShowToast?: {
+    showSuccess: (title: string, message?: string, duration?: number) => string;
+    showError: (title: string, message?: string, duration?: number) => string;
+    showInfo: (title: string, message?: string, duration?: number) => string;
+  };
 }
 
 export default function RegionDetailsPanel({
@@ -19,14 +24,44 @@ export default function RegionDetailsPanel({
   onRegionUpdated,
   onRegionDeleted,
   onRegionDeselected,
-  onError
+  onError,
+  onShowToast
 }: RegionDetailsPanelProps) {
   const [editingRegion, setEditingRegion] = useState<Region | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [analysisStartDate, setAnalysisStartDate] = useState('');
+  const [analysisEndDate, setAnalysisEndDate] = useState('');
 
   useEffect(() => {
-    setEditingRegion(region ? { ...region } : null);
+    if (region) {
+      // If we already have a region and it's different, fade out first
+      if (editingRegion && editingRegion.id !== region.id) {
+        setIsTransitioning(true);
+        setTimeout(() => {
+          setEditingRegion({ ...region });
+          setIsTransitioning(false);
+        }, 150); // Half of the transition duration
+      } else {
+        setEditingRegion({ ...region });
+      }
+    } else {
+      setEditingRegion(null);
+    }
   }, [region]);
+
+  // Set default date ranges when region changes
+  useEffect(() => {
+    if (editingRegion) {
+      // Default to last 3 months
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setMonth(endDate.getMonth() - 3);
+      
+      setAnalysisEndDate(endDate.toISOString().split('T')[0]);
+      setAnalysisStartDate(startDate.toISOString().split('T')[0]);
+    }
+  }, [editingRegion]);
 
   if (!region || !editingRegion) {
     return (
@@ -87,42 +122,64 @@ export default function RegionDetailsPanel({
   const handleDeleteRegion = async () => {
     if (!editingRegion || !confirm('Are you sure you want to delete this monitoring region?')) return;
 
+    const regionName = editingRegion.name;
     setLoading(true);
     try {
       await api.deleteRegion(editingRegion.id);
       onRegionDeleted(editingRegion.id);
+      onShowToast?.showSuccess(
+        'Region Deleted',
+        `Monitoring region "${regionName}" has been successfully deleted.`,
+        5000
+      );
     } catch (err) {
       console.error('Failed to delete region:', err);
-      onError('Failed to delete region');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to delete region';
+      onError(errorMessage);
+      onShowToast?.showError(
+        'Deletion Failed',
+        `Could not delete region "${regionName}": ${errorMessage}`,
+        7000
+      );
     } finally {
       setLoading(false);
     }
   };
 
   const handleTriggerAnalysis = async () => {
-    if (!editingRegion) return;
+    if (!editingRegion || !analysisStartDate || !analysisEndDate) return;
+
+    // Validate date range
+    if (new Date(analysisStartDate) >= new Date(analysisEndDate)) {
+      onError('Start date must be before end date');
+      return;
+    }
 
     setLoading(true);
     try {
-      // Generate date range for the last 3 months
-      const endDate = new Date();
-      const startDate = new Date();
-      startDate.setMonth(endDate.getMonth() - 3);
-      
-      const startDateStr = startDate.toISOString().split('T')[0];
-      const endDateStr = endDate.toISOString().split('T')[0];
-
-      await api.triggerAnalysis(
+      const result = await api.triggerAnalysis(
         editingRegion.latitude,
         editingRegion.longitude,
-        startDateStr,
-        endDateStr,
+        analysisStartDate,
+        analysisEndDate,
         editingRegion.cloudCoverThreshold
       );
+      
       onError(''); // Clear any previous errors
+      onShowToast?.showSuccess(
+        'Analysis Started',
+        `Deforestation analysis has been triggered for ${editingRegion.name}. Job ID: ${result.executionArn}`,
+        7000
+      );
     } catch (err) {
       console.error('Failed to trigger analysis:', err);
-      onError('Failed to trigger analysis');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to trigger analysis';
+      onError(errorMessage);
+      onShowToast?.showError(
+        'Analysis Failed',
+        `Could not start analysis for ${editingRegion.name}: ${errorMessage}`,
+        7000
+      );
     } finally {
       setLoading(false);
     }
@@ -145,7 +202,9 @@ export default function RegionDetailsPanel({
   };
 
   return (
-    <div className="overflow-y-scroll p-6 space-y-6 h-full">
+    <div className={`overflow-y-scroll p-6 space-y-6 h-full transition-all duration-300 ${
+      isTransitioning ? 'opacity-30 scale-95' : 'opacity-100 scale-100'
+    }`}>
       {/* Header with deselect button */}
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-[#0f1419]">Region Details</h2>
@@ -241,6 +300,35 @@ export default function RegionDetailsPanel({
         </div>
       </div>
 
+      {/* Analysis Configuration */}
+      <div className="bg-blue-50 rounded-lg p-4 space-y-4 border border-blue-200">
+        <h3 className="font-medium text-blue-800">Analysis Configuration</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-blue-700 mb-2">Start Date</label>
+            <Input
+              type="date"
+              value={analysisStartDate}
+              onChange={(e) => setAnalysisStartDate(e.target.value)}
+              className="w-full"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-blue-700 mb-2">End Date</label>
+            <Input
+              type="date"
+              value={analysisEndDate}
+              onChange={(e) => setAnalysisEndDate(e.target.value)}
+              className="w-full"
+            />
+          </div>
+        </div>
+        <div className="text-xs text-blue-600 bg-blue-100 p-2 rounded border">
+          <strong>Note:</strong> Analysis will search for satellite imagery between these dates. 
+          Longer date ranges may find more images but take longer to process.
+        </div>
+      </div>
+
       {/* Actions */}
       <div className="border-t p-6 bg-gray-50 space-y-3">
         <Button
@@ -255,7 +343,7 @@ export default function RegionDetailsPanel({
         <div className="grid grid-cols-2 gap-3">
           <Button
             onClick={handleTriggerAnalysis}
-            disabled={loading}
+            disabled={loading || !analysisStartDate || !analysisEndDate}
             variant="outline"
             className="w-full"
           >

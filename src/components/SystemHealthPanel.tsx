@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import useSWR from 'swr';
+import { api } from '../lib/api';
 
 interface HealthMetric {
   id: string;
@@ -12,16 +14,9 @@ interface HealthMetric {
   trend?: 'up' | 'down' | 'stable';
 }
 
-interface ServiceStatus {
-  name: string;
-  status: 'online' | 'degraded' | 'offline';
-  responseTime: number;
-  uptime: string;
-}
-
 interface LambdaFunction {
   name: string;
-  status: 'healthy' | 'warning' | 'error';
+  status: 'healthy' | 'warning' | 'critical';
   invocations: number;
   duration: number;
   memory: number;
@@ -29,369 +24,261 @@ interface LambdaFunction {
   sparklineData: number[];
 }
 
-const generateRandomLatency = () => Math.round(50 + Math.random() * 200);
-const generateRandomUptime = () => `${(99.5 + Math.random() * 0.5).toFixed(2)}%`;
-const generateSparklineData = () => Array.from({ length: 20 }, () => Math.random() * 100);
+// Remove mock data generation functions - use real API data only
 
-// Tiny Lambda sparkline component
-const LambdaSparkline = ({ data, color = '#3b82f6' }: { data: number[]; color?: string }) => {
+const SparklineChart = ({ data }: { data: number[] }) => {
   if (!data || data.length === 0) return null;
-  const max = Math.max(...data, 1);
-  const points = data.map((d, i) => {
-    const x = (i / (data.length - 1)) * 60; // 60px wide
-    const y = 20 - (d / max) * 15; // 20px high, 15px for data
+  
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const range = max - min || 1;
+  
+  const points = data.map((value, index) => {
+    const x = (index / (data.length - 1)) * 100;
+    const y = 100 - ((value - min) / range) * 80;
     return `${x},${y}`;
   }).join(' ');
 
   return (
-    <svg width="60" height="20" className="inline-block">
+    <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
       <polyline
-        points={points}
         fill="none"
-        stroke={color}
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        stroke="currentColor"
+        strokeWidth="2"
+        points={points}
+        className="text-blue-500"
       />
     </svg>
   );
 };
 
+const getStatusColor = (status: 'healthy' | 'warning' | 'critical') => {
+  switch (status) {
+    case 'healthy': return 'text-green-600';
+    case 'warning': return 'text-yellow-600';
+    case 'critical': return 'text-red-600';
+    default: return 'text-gray-600';
+  }
+};
+
+const getStatusBg = (status: 'healthy' | 'warning' | 'critical') => {
+  switch (status) {
+    case 'healthy': return 'bg-green-50 border-green-200';
+    case 'warning': return 'bg-yellow-50 border-yellow-200';
+    case 'critical': return 'bg-red-50 border-red-200';
+    default: return 'bg-gray-50 border-gray-200';
+  }
+};
+
+const fetcher = () => api.getSystemHealth();
+
 export default function SystemHealthPanel() {
-  const [healthMetrics, setHealthMetrics] = useState<HealthMetric[]>([
+  const [isLive, setIsLive] = useState(true);
+  
+  const { data, error, isLoading } = useSWR('system-health', fetcher, {
+    refreshInterval: isLive ? 10000 : 0, // Refresh every 10 seconds when live
+    revalidateOnFocus: false
+  });
+
+  // Convert API data to expected format
+  const healthMetrics: HealthMetric[] = data ? [
     {
-      id: 'api-latency',
-      name: 'API Latency',
-      value: generateRandomLatency(),
-      unit: 'ms',
-      status: 'healthy',
-      description: 'Average response time for API calls',
-      trend: 'stable'
+      id: 'overall-health',
+      name: 'Overall Health',
+      value: data.overall_health || 'unknown',
+      status: data.overall_health === 'healthy' ? 'healthy' : 'warning',
+      description: 'System-wide health status'
     },
     {
-      id: 'error-rate',
-      name: 'Error Rate',
-      value: 0.2,
+      id: 'cpu-usage',
+      name: 'CPU Usage',
+      value: data.resource_utilization?.cpu_usage || 0,
       unit: '%',
-      status: 'healthy',
-      description: 'Percentage of failed requests',
-      trend: 'down'
+      status: (data.resource_utilization?.cpu_usage || 0) > 80 ? 'critical' : 
+             (data.resource_utilization?.cpu_usage || 0) > 60 ? 'warning' : 'healthy',
+      description: 'System CPU utilization'
     },
     {
-      id: 'queue-length',
-      name: 'Job Queue',
-      value: 3,
-      unit: 'jobs',
-      status: 'healthy',
-      description: 'Pending analysis jobs in queue',
-      trend: 'stable'
+      id: 'memory-usage',
+      name: 'Memory Usage',
+      value: data.resource_utilization?.memory_usage || 0,
+      unit: '%',
+      status: (data.resource_utilization?.memory_usage || 0) > 80 ? 'critical' : 
+             (data.resource_utilization?.memory_usage || 0) > 60 ? 'warning' : 'healthy',
+      description: 'System memory utilization'
     },
     {
       id: 'disk-usage',
-      name: 'Storage',
-      value: 67,
+      name: 'Disk Usage',
+      value: data.resource_utilization?.disk_usage || 0,
       unit: '%',
-      status: 'warning',
-      description: 'S3 bucket usage percentage',
-      trend: 'up'
+      status: (data.resource_utilization?.disk_usage || 0) > 80 ? 'critical' : 
+             (data.resource_utilization?.disk_usage || 0) > 60 ? 'warning' : 'healthy',
+      description: 'Storage utilization'
     }
-  ]);
+  ] : [];
 
-  const [lambdaFunctions, setLambdaFunctions] = useState<LambdaFunction[]>([
-    { 
-      name: 'satellite-processor', 
-      status: 'healthy', 
-      invocations: 245, 
-      duration: 1234, 
-      memory: 512, 
-      errors: 0,
-      sparklineData: generateSparklineData()
-    },
-    { 
-      name: 'deforestation-analyzer', 
-      status: 'healthy', 
-      invocations: 89, 
-      duration: 2567, 
-      memory: 1024, 
-      errors: 2,
-      sparklineData: generateSparklineData()
-    },
-    { 
-      name: 'alert-processor', 
-      status: 'warning', 
-      invocations: 34, 
-      duration: 456, 
-      memory: 256, 
-      errors: 1,
-      sparklineData: generateSparklineData()
-    },
-    { 
-      name: 'region-updater', 
-      status: 'healthy', 
-      invocations: 12, 
-      duration: 789, 
-      memory: 512, 
-      errors: 0,
-      sparklineData: generateSparklineData()
-    }
-  ]);
+  const lambdaFunctions: LambdaFunction[] = data?.lambda_functions ? 
+    Object.entries(data.lambda_functions).map(([name, status]) => ({
+      name: name.replace('forestshield-', ''),
+      status: status === 'healthy' ? 'healthy' : 'warning',
+      invocations: 0, // Real data would come from CloudWatch metrics
+      duration: 0,
+      memory: 512,
+      errors: status === 'healthy' ? 0 : 1,
+      sparklineData: [] // Real sparkline data would come from CloudWatch metrics
+    })) : [];
 
-  // Update metrics periodically
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setHealthMetrics(prev => prev.map(metric => {
-        let newValue = metric.value;
-        let newStatus = metric.status;
-        let newTrend = metric.trend;
+  if (error) {
+    return (
+      <div className="p-4 bg-white rounded-lg shadow-sm">
+        <div className="text-center text-red-600">
+          <div className="text-4xl mb-4">❌</div>
+          <h2 className="text-lg font-semibold mb-2">Failed to Load System Health</h2>
+          <p className="text-sm text-gray-600">{error.message}</p>
+        </div>
+      </div>
+    );
+  }
 
-        switch (metric.id) {
-          case 'api-latency':
-            newValue = generateRandomLatency();
-            newStatus = Number(newValue) > 200 ? 'warning' : Number(newValue) > 400 ? 'critical' : 'healthy';
-            newTrend = Number(newValue) > Number(metric.value) ? 'up' : Number(newValue) < Number(metric.value) ? 'down' : 'stable';
-            break;
-          case 'error-rate':
-            newValue = Math.max(0, Number(metric.value) + (Math.random() - 0.5) * 0.1);
-            newValue = Math.round(Number(newValue) * 100) / 100;
-            newStatus = Number(newValue) > 1 ? 'warning' : Number(newValue) > 3 ? 'critical' : 'healthy';
-            break;
-          case 'queue-length':
-            newValue = Math.max(0, Number(metric.value) + Math.floor((Math.random() - 0.5) * 3));
-            newStatus = Number(newValue) > 10 ? 'warning' : Number(newValue) > 20 ? 'critical' : 'healthy';
-            break;
-          case 'disk-usage':
-            newValue = Math.min(100, Math.max(0, Number(metric.value) + (Math.random() - 0.5) * 2));
-            newValue = Math.round(Number(newValue));
-            newStatus = Number(newValue) > 80 ? 'warning' : Number(newValue) > 95 ? 'critical' : 'healthy';
-            break;
-        }
-
-        return { ...metric, value: newValue, status: newStatus, trend: newTrend };
-      }));
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  // Update Lambda functions periodically
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setLambdaFunctions(prev => prev.map(func => ({
-        ...func,
-        invocations: Math.max(0, func.invocations + Math.floor((Math.random() - 0.3) * 10)),
-        duration: Math.max(100, func.duration + Math.floor((Math.random() - 0.5) * 200)),
-        errors: Math.max(0, func.errors + (Math.random() > 0.9 ? 1 : Math.random() > 0.95 ? -1 : 0)),
-        sparklineData: [...func.sparklineData.slice(1), Math.random() * 100],
-        status: func.errors > 5 ? 'error' : func.duration > 3000 ? 'warning' : 'healthy'
-      })));
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  const getStatusColor = (status: 'healthy' | 'warning' | 'critical' | 'online' | 'degraded' | 'offline' | 'error') => {
-    switch (status) {
-      case 'healthy':
-      case 'online':
-        return 'text-green-700 bg-green-50 border-green-200';
-      case 'warning':
-      case 'degraded':
-        return 'text-orange-700 bg-orange-50 border-orange-200';
-      case 'critical':
-      case 'offline':
-      case 'error':
-        return 'text-red-700 bg-red-50 border-red-200';
-      default:
-        return 'text-gray-700 bg-gray-50 border-gray-200';
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'healthy':
-      case 'online':
-        return '✓';
-      case 'warning':
-      case 'degraded':
-        return '⚠';
-      case 'critical':
-      case 'offline':
-      case 'error':
-        return '✕';
-      default:
-        return '○';
-    }
-  };
-
-  const getTrendIcon = (trend: 'up' | 'down' | 'stable' | undefined) => {
-    switch (trend) {
-      case 'up': return '↗';
-      case 'down': return '↘';
-      case 'stable': return '→';
-      default: return '';
-    }
-  };
-
-  const getMetricColor = (status: 'healthy' | 'warning' | 'critical') => {
-    switch (status) {
-      case 'healthy': return 'text-green-700';
-      case 'warning': return 'text-orange-700';
-      case 'critical': return 'text-red-700';
-      default: return 'text-gray-700';
-    }
-  };
-
-  const overallHealth = healthMetrics.every(m => m.status === 'healthy') && lambdaFunctions.every(f => f.status === 'healthy') ? 'healthy' : 
-                      healthMetrics.some(m => m.status === 'critical') || lambdaFunctions.some(f => f.status === 'error') ? 'critical' : 'warning';
+  if (isLoading) {
+    return (
+      <div className="p-4 bg-white rounded-lg shadow-sm">
+        <div className="animate-pulse">
+          <div className="h-6 bg-gray-200 rounded mb-4"></div>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div className="h-20 bg-gray-200 rounded"></div>
+            <div className="h-20 bg-gray-200 rounded"></div>
+          </div>
+          <div className="space-y-3">
+            <div className="h-4 bg-gray-200 rounded"></div>
+            <div className="h-4 bg-gray-200 rounded"></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="h-full flex flex-col bg-gray-50">
-      <div className="p-4 border-b bg-white shadow-sm">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">System Health</h3>
-          <div className={`flex items-center gap-2 px-3 py-1.5 border-2 ${getStatusColor(overallHealth)}`}>
-            <span className="font-bold">{getStatusIcon(overallHealth)}</span>
-            <span className="capitalize font-semibold">{overallHealth}</span>
-          </div>
-        </div>
+    <div className="p-4 bg-white rounded-lg shadow-sm space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-gray-800">System Health</h2>
+        <button
+          onClick={() => setIsLive(!isLive)}
+          className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+            isLive 
+              ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          <div className={`w-2 h-2 rounded-full ${isLive ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
+          {isLive ? 'Live' : 'Paused'}
+        </button>
       </div>
-      
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        {/* Performance Metrics */}
-        <div>
-          <h4 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-            <span className="w-1 h-4 bg-blue-500"></span>
-            Performance Metrics
-          </h4>
-          <div className="grid grid-cols-2 gap-4">
-            {healthMetrics.map((metric) => (
-              <div key={metric.id} className="bg-white border border-gray-200 p-4 shadow-sm hover:shadow-md transition-all duration-200">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 ${
-                      metric.status === 'healthy' ? 'bg-green-500' : 
-                      metric.status === 'warning' ? 'bg-orange-500' : 'bg-red-500'
-                    }`}></div>
-                    <span className="text-sm font-medium text-gray-700">{metric.name}</span>
-                  </div>
-                  <span className="text-lg font-semibold text-gray-400">{getTrendIcon(metric.trend)}</span>
+
+      {/* Health Metrics */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {healthMetrics.map((metric) => (
+          <div
+            key={metric.id}
+            className={`p-3 border rounded-lg ${getStatusBg(metric.status)}`}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium text-gray-700">{metric.name}</h3>
+              <div className={`w-2 h-2 rounded-full ${
+                metric.status === 'healthy' ? 'bg-green-500' : 
+                metric.status === 'warning' ? 'bg-yellow-500' : 'bg-red-500'
+              }`} />
+            </div>
+            <div className="text-lg font-bold text-gray-900">
+              {typeof metric.value === 'number' ? metric.value.toFixed(1) : metric.value}
+              {metric.unit && <span className="text-sm text-gray-600 ml-1">{metric.unit}</span>}
+            </div>
+            <p className="text-xs text-gray-600 mt-1">{metric.description}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* AWS Services */}
+      {data?.aws_services && (
+        <div className="space-y-4">
+          <h3 className="text-md font-semibold text-gray-800">AWS Services</h3>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {Object.entries(data.aws_services).map(([service, status]) => (
+              <div
+                key={service}
+                className={`p-3 border rounded-lg ${
+                  status === 'healthy' ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-700 capitalize">{service}</span>
+                  <div className={`w-2 h-2 rounded-full ${
+                    status === 'healthy' ? 'bg-green-500' : 'bg-yellow-500'
+                  }`} />
                 </div>
-                <div className="flex items-baseline gap-2 mb-2">
-                  <span className={`text-2xl font-bold ${getMetricColor(metric.status)}`}>
-                    {metric.value}
-                  </span>
-                  {metric.unit && <span className="text-sm text-gray-500 font-medium">{metric.unit}</span>}
-                </div>
-                <p className="text-xs text-gray-600 leading-relaxed">{metric.description}</p>
-                <div className="mt-3 pt-3 border-t border-gray-100">
-                  <span className={`inline-flex items-center px-2 py-1 text-xs font-semibold ${
-                    metric.status === 'healthy' ? 'bg-green-100 text-green-800' :
-                    metric.status === 'warning' ? 'bg-orange-100 text-orange-800' :
-                    'bg-red-100 text-red-800'
-                  }`}>
-                    {metric.status.toUpperCase()}
-                  </span>
-                </div>
+                <p className="text-xs text-gray-600 mt-1 capitalize">{status as string}</p>
               </div>
             ))}
           </div>
         </div>
+      )}
 
-        {/* Lambda Functions Health */}
-        <div>
-          <h4 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-            <span className="w-1 h-4 bg-purple-500"></span>
-            AWS Lambda Functions
-          </h4>
-          <div className="bg-white border border-gray-200 shadow-sm overflow-hidden">
-            {lambdaFunctions.map((func, index) => (
-              <div key={func.name} className={`p-4 hover:bg-gray-50 transition-colors ${
-                index !== lambdaFunctions.length - 1 ? 'border-b border-gray-100' : ''
-              }`}>
+      {/* Lambda Functions */}
+      {lambdaFunctions.length > 0 && (
+        <div className="space-y-4">
+          <h3 className="text-md font-semibold text-gray-800">Lambda Functions</h3>
+          <div className="space-y-3">
+            {lambdaFunctions.map((func) => (
+              <div
+                key={func.name}
+                className={`p-3 border rounded-lg ${getStatusBg(func.status)}`}
+              >
                 <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-3 h-3 ${
-                      func.status === 'healthy' ? 'bg-green-500' :
-                      func.status === 'warning' ? 'bg-orange-500' :
-                      'bg-red-500'
-                    }`}></div>
-                    <span className="text-sm font-semibold text-gray-900">{func.name}</span>
-                    <span className={`inline-flex items-center px-2 py-0.5 text-xs font-semibold ${getStatusColor(func.status)}`}>
-                      {func.status.toUpperCase()}
-                    </span>
-                  </div>
-                  <LambdaSparkline 
-                    data={func.sparklineData} 
-                    color={func.status === 'healthy' ? '#10b981' : func.status === 'warning' ? '#f59e0b' : '#ef4444'} 
-                  />
+                  <h4 className="font-medium text-gray-800 capitalize">{func.name}</h4>
+                  <div className={`w-2 h-2 rounded-full ${
+                    func.status === 'healthy' ? 'bg-green-500' : 
+                    func.status === 'warning' ? 'bg-yellow-500' : 'bg-red-500'
+                  }`} />
                 </div>
-                <div className="grid grid-cols-4 gap-4 text-xs">
+                <div className="grid grid-cols-4 gap-4 text-sm">
                   <div>
-                    <span className="text-gray-500">Invocations</span>
-                    <div className="font-semibold text-gray-900">{func.invocations}</div>
+                    <span className="text-gray-600">Invocations:</span>
+                    <div className="font-medium">{func.invocations}</div>
                   </div>
                   <div>
-                    <span className="text-gray-500">Duration</span>
-                    <div className="font-semibold text-gray-900">{func.duration}ms</div>
+                    <span className="text-gray-600">Duration:</span>
+                    <div className="font-medium">{func.duration}ms</div>
                   </div>
                   <div>
-                    <span className="text-gray-500">Memory</span>
-                    <div className="font-semibold text-gray-900">{func.memory}MB</div>
+                    <span className="text-gray-600">Memory:</span>
+                    <div className="font-medium">{func.memory}MB</div>
                   </div>
                   <div>
-                    <span className="text-gray-500">Errors</span>
-                    <div className={`font-semibold ${func.errors > 0 ? 'text-red-600' : 'text-green-600'}`}>{func.errors}</div>
+                    <span className="text-gray-600">Errors:</span>
+                    <div className={`font-medium ${func.errors > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                      {func.errors}
+                    </div>
                   </div>
                 </div>
+                {func.sparklineData && (
+                  <div className="mt-2 h-8">
+                    <SparklineChart data={func.sparklineData} />
+                  </div>
+                )}
               </div>
             ))}
           </div>
         </div>
+      )}
 
-        {/* Infrastructure Status */}
-        <div>
-          <h4 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-            <span className="w-1 h-4 bg-teal-500"></span>
-            Infrastructure
-          </h4>
-          <div className="grid grid-cols-1 gap-3">
-            <div className="bg-white border border-gray-200 p-4 shadow-sm hover:shadow-md transition-all duration-200">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-blue-100 flex items-center justify-center">
-                    <span className="text-blue-600 text-lg font-bold">🌐</span>
-                  </div>
-                  <div>
-                    <span className="text-sm font-semibold text-gray-900">Network Connection</span>
-                    <div className="text-xs text-gray-500 mt-0.5">Global connectivity status</div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-xs text-green-700 font-semibold">CONNECTED</div>
-                  <div className="text-xs text-gray-500 mt-0.5">99.9% uptime</div>
-                </div>
-              </div>
-            </div>
-            <div className="bg-white border border-gray-200 p-4 shadow-sm hover:shadow-md transition-all duration-200">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-orange-100 flex items-center justify-center">
-                    <span className="text-orange-600 text-lg font-bold">📡</span>
-                  </div>
-                  <div>
-                    <span className="text-sm font-semibold text-gray-900">AWS Region</span>
-                    <div className="text-xs text-gray-500 mt-0.5">Primary deployment region</div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-xs text-gray-700 font-semibold">US-EAST-1</div>
-                  <div className="text-xs text-gray-500 mt-0.5">N. Virginia</div>
-                </div>
-              </div>
-            </div>
-          </div>
+      {/* Last Updated */}
+      {data?.last_check && (
+        <div className="text-xs text-gray-500 text-center">
+          Last updated: {new Date(data.last_check).toLocaleString()}
         </div>
-      </div>
+      )}
     </div>
   );
 } 

@@ -1,114 +1,59 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import useSWR from 'swr';
+import { api } from '../lib/api';
 
 interface LogEntry {
   id: string;
-  timestamp: Date;
+  timestamp: string;
   level: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'FATAL';
-  service: string;
+  service?: string;
   message: string;
-  metadata?: Record<string, any>;
+  logGroup?: string;
+  logStream?: string;
 }
 
-const logTemplates = [
-  { level: 'INFO', service: 'API', message: 'Region {region} analysis request received' },
-  { level: 'INFO', service: 'Lambda', message: 'Processing satellite images for region {region}' },
-  { level: 'INFO', service: 'StepFunction', message: 'Workflow execution started for region {region}' },
-  { level: 'WARN', service: 'S3', message: 'High storage usage detected: {usage}% full' },
-  { level: 'ERROR', service: 'SatelliteAPI', message: 'Failed to fetch images for region {region}: timeout' },
-  { level: 'INFO', service: 'Database', message: 'Region {region} data updated successfully' },
-  { level: 'DEBUG', service: 'Auth', message: 'User authentication successful' },
-  { level: 'INFO', service: 'SNS', message: 'Alert notification sent for region {region}' },
-  { level: 'WARN', service: 'Lambda', message: 'Memory usage approaching limit: {memory}MB' },
-  { level: 'ERROR', service: 'Database', message: 'Connection timeout while updating region {region}' },
-  { level: 'INFO', service: 'CloudWatch', message: 'Metrics updated for region {region}' },
-  { level: 'DEBUG', service: 'API', message: 'Health check completed successfully' },
-];
-
-const regions = ['Amazon-North', 'Amazon-South', 'Cerrado-Central', 'Atlantic-Forest'];
-const services = ['API', 'Lambda', 'StepFunction', 'S3', 'Database', 'SNS', 'CloudWatch', 'SatelliteAPI'];
-
-const generateLogEntry = (): LogEntry => {
-  const template = logTemplates[Math.floor(Math.random() * logTemplates.length)];
-  const region = regions[Math.floor(Math.random() * regions.length)];
-  const usage = Math.floor(Math.random() * 40 + 60);
-  const memory = Math.floor(Math.random() * 500 + 800);
-
-  return {
-    id: `log-${Date.now()}-${Math.random()}`,
-    timestamp: new Date(),
-    level: template.level as LogEntry['level'],
-    service: template.service,
-    message: template.message
-      .replace('{region}', region)
-      .replace('{usage}', usage.toString())
-      .replace('{memory}', memory.toString()),
-    metadata: {
-      requestId: `req-${Math.random().toString(36).substr(2, 9)}`,
-      executionTime: Math.floor(Math.random() * 1000 + 100),
-    }
-  };
-};
+const fetcher = (params: { logGroup?: string; limit?: number }) => 
+  api.getCloudWatchLogs(params.logGroup, params.limit);
 
 export default function LogsPanel() {
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [filteredLogs, setFilteredLogs] = useState<LogEntry[]>([]);
   const [isLive, setIsLive] = useState(true);
   const [levelFilter, setLevelFilter] = useState<string>('ALL');
   const [serviceFilter, setServiceFilter] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
   const [isAutoScroll, setIsAutoScroll] = useState(true);
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // Generate initial logs
-  useEffect(() => {
-    const initialLogs = Array.from({ length: 15 }, () => {
-      const log = generateLogEntry();
-      log.timestamp = new Date(Date.now() - Math.random() * 3600000); // Random time in last hour
-      return log;
-    });
-    setLogs(initialLogs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()));
-  }, []);
+  const { data, error, isLoading } = useSWR(
+    { logGroup: undefined, limit: 100 },
+    fetcher,
+    {
+      refreshInterval: isLive ? 5000 : 0, // Refresh every 5 seconds when live
+      revalidateOnFocus: false
+    }
+  );
 
-  // Generate new logs periodically
-  useEffect(() => {
-    if (!isLive) return;
+  const logs: LogEntry[] = data?.logs || [];
 
-    const interval = setInterval(() => {
-      const newLog = generateLogEntry();
-      setLogs(prev => [newLog, ...prev.slice(0, 99)]); // Keep only 100 logs
-    }, Math.random() * 3000 + 1000); // Random interval between 1-4 seconds
-
-    return () => clearInterval(interval);
-  }, [isLive]);
+  // Get unique services for filter
+  const services = Array.from(new Set(logs.map(log => log.service).filter(Boolean)));
 
   // Filter logs
-  useEffect(() => {
-    let filtered = logs;
-
-    if (levelFilter !== 'ALL') {
-      filtered = filtered.filter(log => log.level === levelFilter);
-    }
-
-    if (serviceFilter !== 'ALL') {
-      filtered = filtered.filter(log => log.service === serviceFilter);
-    }
-
-    if (searchTerm) {
-      filtered = filtered.filter(log =>
-        log.message.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        log.service.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    setFilteredLogs(filtered);
-  }, [logs, levelFilter, serviceFilter, searchTerm]);
+  const filteredLogs = logs.filter(log => {
+    if (levelFilter !== 'ALL' && log.level !== levelFilter) return false;
+    if (serviceFilter !== 'ALL' && log.service !== serviceFilter) return false;
+    if (searchTerm && !log.message.toLowerCase().includes(searchTerm.toLowerCase()) &&
+        !log.service?.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+    return true;
+  });
 
   // Auto scroll to bottom
   useEffect(() => {
-    if (isAutoScroll && logsEndRef.current) {
-      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (isAutoScroll && scrollContainerRef.current) {
+      const container = scrollContainerRef.current;
+      container.scrollTop = container.scrollHeight;
     }
   }, [filteredLogs, isAutoScroll]);
 
@@ -134,8 +79,8 @@ export default function LogsPanel() {
     }
   };
 
-  const formatTimestamp = (date: Date) => {
-    return date.toLocaleTimeString('en-US', {
+  const formatTimestamp = (timestamp: string) => {
+    return new Date(timestamp).toLocaleTimeString('en-US', {
       hour12: false,
       hour: '2-digit',
       minute: '2-digit',
@@ -144,17 +89,30 @@ export default function LogsPanel() {
     });
   };
 
-  const clearLogs = () => {
-    setLogs([]);
-  };
+  if (error) {
+    return (
+      <div className="h-full flex flex-col bg-white">
+        <div className="p-2 border-b bg-[#f8f9fa]">
+          <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wide">System Logs</h3>
+        </div>
+        <div className="flex-1 flex items-center justify-center text-red-600">
+          <div className="text-center">
+            <div className="text-2xl mb-2">❌</div>
+            <p className="text-sm">Failed to load logs</p>
+            <p className="text-xs text-gray-400">{error.message}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col bg-white">
-      {/* Header with controls */}
-      <div className="p-4 border-b bg-gray-50 space-y-3">
+      {/* Compact Header */}
+      <div className="p-2 border-b bg-[#f8f9fa]">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-800">System Logs</h3>
-          <div className="flex items-center gap-2">
+          <h3 className="text-xs font-semibold text-gray-800 uppercase tracking-wide">System Logs</h3>
+          <div className="flex items-center gap-1">
             <button
               onClick={() => setIsAutoScroll(!isAutoScroll)}
               className={`px-2 py-1 rounded text-xs font-medium transition-colors ${isAutoScroll
@@ -162,41 +120,38 @@ export default function LogsPanel() {
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
             >
-              Auto-scroll
-            </button>
-            <button
-              onClick={clearLogs}
-              className="px-2 py-1 rounded text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
-            >
-              Clear
+              Auto
             </button>
             <button
               onClick={() => setIsLive(!isLive)}
-              className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium transition-colors ${isLive
+              className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium transition-colors ${isLive
                   ? 'bg-green-100 text-green-700 hover:bg-green-200'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
             >
-              <div className={`w-2 h-2 rounded-full ${isLive ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
+              <div className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
               {isLive ? 'Live' : 'Paused'}
             </button>
           </div>
         </div>
+      </div>
 
-        {/* Filters */}
-        <div className="flex flex-col items-center gap-3 text-xs">
+      {/* Scrollable Content with Filters and Logs */}
+      <div className="flex-1 overflow-y-auto" ref={scrollContainerRef}>
+        {/* Filters - Now part of scrollable content */}
+        <div className="p-3 border-b bg-gray-50 space-y-2 sticky top-0 z-10">
           <input
             type="text"
             placeholder="Search logs..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="flex-1 px-3 py-1 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full px-2 py-1 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs"
           />
-          <div className="flex items-center gap-2 w-full">
+          <div className="flex items-center gap-2">
             <select
               value={levelFilter}
               onChange={(e) => setLevelFilter(e.target.value)}
-              className="px-2 py-1 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="px-2 py-1 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs"
             >
               <option value="ALL">All Levels</option>
               <option value="DEBUG">Debug</option>
@@ -208,7 +163,7 @@ export default function LogsPanel() {
             <select
               value={serviceFilter}
               onChange={(e) => setServiceFilter(e.target.value)}
-              className="px-2 py-1 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="px-2 py-1 border rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs"
             >
               <option value="ALL">All Services</option>
               {services.map(service => (
@@ -217,57 +172,59 @@ export default function LogsPanel() {
             </select>
           </div>
         </div>
-      </div>
 
-      {/* Logs list */}
-      <div className="flex-1 overflow-y-auto font-mono text-xs">
-        {filteredLogs.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-gray-500">
-            <div className="text-center">
-              <div className="text-2xl mb-2">📝</div>
-              <p className="text-sm">No logs match your filters</p>
-            </div>
-          </div>
-        ) : (
-          <div>
-            {filteredLogs.map((log, index) => (
-              <div
-                key={log.id}
-                className={`border-b border-gray-100 p-2 hover:bg-gray-50 transition-colors animate-in slide-in-from-top duration-200 ${index === 0 ? 'bg-blue-50/50' : ''
-                  }`}
-                style={{ animationDelay: `${index * 20}ms` }}
-              >
-                <div className="flex items-start gap-3">
-                  <span className="text-gray-400 text-xs font-mono flex-shrink-0 w-16">
-                    {formatTimestamp(log.timestamp)}
-                  </span>
-                  <span className={`px-2 py-0.5 rounded text-xs font-medium flex-shrink-0 ${getLevelColor(log.level)}`}>
-                    {log.level}
-                  </span>
-                  <span className="text-gray-600 font-medium flex-shrink-0 w-20 truncate">
-                    {log.service}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-gray-800 break-words">{log.message}</p>
-                    {log.metadata && (
-                      <div className="text-gray-500 text-xs mt-1">
-                        ID: {log.metadata.requestId} • {log.metadata.executionTime}ms
-                      </div>
-                    )}
-                  </div>
-                  <span className="text-sm flex-shrink-0">{getLevelIcon(log.level)}</span>
-                </div>
+        {/* Logs list */}
+        <div className="font-mono text-xs">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-32 text-gray-500">
+              <div className="text-center">
+                <div className="text-lg mb-1 animate-spin">⚙️</div>
+                <p className="text-xs">Loading logs...</p>
               </div>
-            ))}
-            <div ref={logsEndRef} />
-          </div>
-        )}
-      </div>
-
-      {/* Footer stats */}
-      <div className="p-2 border-t bg-gray-50 text-xs text-gray-500 flex items-center justify-between">
-        <span>Showing {filteredLogs.length} of {logs.length} logs</span>
-        <span>Updated {logs.length > 0 ? formatTimestamp(logs[0].timestamp) : 'never'}</span>
+            </div>
+          ) : filteredLogs.length === 0 ? (
+            <div className="flex items-center justify-center h-32 text-gray-500">
+              <div className="text-center">
+                <div className="text-lg mb-1">📝</div>
+                <p className="text-xs">No logs match your filters</p>
+              </div>
+            </div>
+          ) : (
+            <div>
+              {filteredLogs.map((log, index) => (
+                <div
+                  key={log.id}
+                  className={`border-b border-gray-100 p-2 hover:bg-gray-50 transition-colors ${
+                    index === 0 ? 'bg-blue-50/50' : ''
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="text-gray-400 text-xs font-mono flex-shrink-0 w-14">
+                      {formatTimestamp(log.timestamp)}
+                    </span>
+                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium flex-shrink-0 ${getLevelColor(log.level)}`}>
+                      {log.level}
+                    </span>
+                    {log.service && (
+                      <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 flex-shrink-0">
+                        {log.service}
+                      </span>
+                    )}
+                    <span className="text-gray-700 flex-1 leading-relaxed break-words">
+                      {log.message}
+                    </span>
+                  </div>
+                  {log.logGroup && (
+                    <div className="mt-1 text-xs text-gray-400 pl-16">
+                      {log.logGroup}{log.logStream && ` / ${log.logStream}`}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div ref={logsEndRef} />
       </div>
     </div>
   );

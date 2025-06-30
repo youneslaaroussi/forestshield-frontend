@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import useSWR from 'swr';
+import { api, DashboardStats } from '../lib/api';
 
 // StatItem with label in top left, padding, and uppercase
 const StatItem = ({
@@ -21,89 +23,91 @@ const StatItem = ({
   </div>
 );
 
-// Compact, real-time sparkline chart component
-const generateSparklineData = () => Array.from({ length: 40 }, () => 5 + Math.random() * 10);
-
+// Real-time sparkline chart component using actual metrics
 const SparklineChart = ({ data }: { data: number[] }) => {
-    if (!data || data.length === 0) return null;
-    const max = Math.max(...data);
-    const points = data.map((d, i) => {
-        const x = (i / (data.length - 1)) * 100;
-        const y = 100 - (d / max) * 90;
-        return `${x},${y}`;
-    }).join(' ');
+  if (!data || data.length === 0) return null;
+  
+  const maxValue = Math.max(...data);
+  const minValue = Math.min(...data);
+  const range = maxValue - minValue || 1;
 
-    return (
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-full">
-            <defs>
-                <linearGradient id="sparklineGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                    <stop offset="0%" stopColor="rgba(59, 130, 246, 0.4)" />
-                    <stop offset="100%" stopColor="rgba(59, 130, 246, 0)" />
-                </linearGradient>
-            </defs>
-            <polyline
-                points={points}
-                fill="none"
-                stroke="rgba(59, 130, 246, 0.8)"
-                strokeWidth="4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-            />
-            <polygon
-                points={`0,100 ${points} 100,100`}
-                fill="url(#sparklineGradient)"
-            />
-        </svg>
-    );
+  const points = data.map((value, index) => {
+    const x = (index / (data.length - 1)) * 100;
+    const y = 100 - ((value - minValue) / range) * 100;
+    return `${x},${y}`;
+  }).join(' ');
+
+  return (
+    <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+      <polyline
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        points={points}
+        className="text-blue-400"
+      />
+    </svg>
+  );
 };
+
+const fetcher = () => api.getDashboardStats();
 
 export default function DashboardStatsPanel({ className }: { className?: string }) {
   const [isLive, setIsLive] = useState(true);
-  const [stats, setStats] = useState({
-    totalRegions: 12,
-    activeAlerts: 1,
-    activeJobs: 3,
-    lastUpdate: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+  const [sparklineData, setSparklineData] = useState<number[]>([]);
+  
+  const { data: stats, error, isLoading } = useSWR('dashboard-stats', fetcher, {
+    refreshInterval: isLive ? 2000 : 0, // Refresh every 2 seconds when live
+    revalidateOnFocus: false
   });
-  const [sparklineData, setSparklineData] = useState(generateSparklineData());
 
-  // Mock live stats updates
+  // Update sparkline with real activity data
   useEffect(() => {
-    if (!isLive) return;
+    if (!isLive || !stats) return;
     const interval = setInterval(() => {
-      setStats(prev => ({
-        ...prev,
-        activeAlerts: Math.random() > 0.95 ? Math.floor(Math.random() * 5) : prev.activeAlerts,
-        activeJobs: Math.random() > 0.8 ? Math.floor(Math.random() * 5) : prev.activeJobs,
-        lastUpdate: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      }));
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [isLive]);
-
-  // Mock live sparkline updates
-  useEffect(() => {
-    if (!isLive) return;
-    const interval = setInterval(() => {
-        setSparklineData(prev => [...prev.slice(1), 5 + Math.random() * 10]);
+      // Use real metrics for sparkline - active jobs as activity indicator
+      const activityValue = stats.activeJobs || 0;
+      setSparklineData((prev: number[]) => {
+        const newData = [...prev.slice(-39), activityValue]; // Keep last 40 points
+        return newData;
+      });
     }, 1000);
     return () => clearInterval(interval);
-  }, [isLive]);
+  }, [isLive, stats]);
+
+  // Default stats for loading state
+  const displayStats = stats || {
+    totalRegions: 0,
+    activeAlerts: 0,
+    activeJobs: 0,
+    lastUpdate: new Date().toISOString()
+  };
+
+  const lastUpdateTime = new Date(displayStats.lastUpdate).toLocaleTimeString([], { 
+    hour: '2-digit', 
+    minute: '2-digit', 
+    second: '2-digit' 
+  });
 
   return (
     <div className={`bg-[#232f3e] border-b border-black/50 px-4 h-[60px] flex items-center justify-between text-white shadow-md ${className}`}>
       <div className="flex items-center h-full">
         <h1 className="text-lg font-bold text-white pr-6">Forest Shield</h1>
         <div className="flex h-full">
-            <StatItem label="System Status" value="Healthy" icon="✅" valueColor="text-green-400" />
-            <StatItem label="Regions" value={stats.totalRegions} icon="🌍" />
+            <StatItem 
+              label="System Status" 
+              value={error ? "Error" : isLoading ? "Loading" : "Healthy"} 
+              icon="✅" 
+              valueColor={error ? "text-red-400" : isLoading ? "text-yellow-400" : "text-green-400"} 
+            />
+            <StatItem label="Regions" value={displayStats.totalRegions} icon="🌍" />
             <StatItem 
               label="Active Alerts" 
-              value={stats.activeAlerts} 
+              value={displayStats.activeAlerts} 
               icon="⚠️"
-              valueColor={stats.activeAlerts > 0 ? "text-yellow-400" : "text-green-400"}
+              valueColor={displayStats.activeAlerts > 0 ? "text-yellow-400" : "text-green-400"}
             />
-            <StatItem label="Active Jobs" value={stats.activeJobs} icon="⚙️" />
+            <StatItem label="Active Jobs" value={displayStats.activeJobs} icon="⚙️" />
         </div>
       </div>
       
@@ -116,7 +120,7 @@ export default function DashboardStatsPanel({ className }: { className?: string 
         </div>
         <div className="flex items-center gap-2 text-xs">
            <span className="text-gray-400">Last Sync:</span>
-           <span className="font-mono text-sm">{stats.lastUpdate}</span>
+           <span className="font-mono text-sm">{lastUpdateTime}</span>
         </div>
         <div 
           onClick={() => setIsLive(!isLive)}

@@ -1,30 +1,18 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import useSWR from 'swr';
+import { api } from '../lib/api';
 
 interface Activity {
   id: string;
   type: 'analysis' | 'alert' | 'region' | 'system' | 'error';
   message: string;
-  timestamp: Date;
-  regionName?: string;
+  timestamp: string;
+  service?: string;
   severity?: 'low' | 'medium' | 'high' | 'critical';
+  details?: any;
 }
-
-const activityTemplates = [
-  { type: 'analysis', message: 'Analysis started for region {region}', severity: 'low' },
-  { type: 'analysis', message: 'Analysis completed for region {region}', severity: 'medium' },
-  { type: 'alert', message: 'Deforestation alert detected in {region}', severity: 'high' },
-  { type: 'alert', message: 'Critical deforestation threshold exceeded in {region}', severity: 'critical' },
-  { type: 'region', message: 'New monitoring region {region} created', severity: 'low' },
-  { type: 'region', message: 'Region {region} status updated to active', severity: 'medium' },
-  { type: 'system', message: 'Satellite data sync completed', severity: 'low' },
-  { type: 'system', message: 'System health check passed', severity: 'low' },
-  { type: 'system', message: 'AWS Step Function execution started', severity: 'medium' },
-  { type: 'error', message: 'Failed to process images for region {region}', severity: 'high' },
-];
-
-const regions = ['Amazon North', 'Amazon South', 'Cerrado Central', 'Atlantic Forest', 'Pantanal', 'Caatinga'];
 
 const getActivityIcon = (type: Activity['type']) => {
   switch (type) {
@@ -57,7 +45,8 @@ const getSeverityBg = (severity: Activity['severity']) => {
   }
 };
 
-const formatTimestamp = (date: Date) => {
+const formatTimestamp = (timestamp: string) => {
+  const date = new Date(timestamp);
   const now = new Date();
   const diff = now.getTime() - date.getTime();
   const seconds = Math.floor(diff / 1000);
@@ -70,57 +59,46 @@ const formatTimestamp = (date: Date) => {
   return date.toLocaleDateString();
 };
 
+const fetcher = () => api.getActivityFeed(50);
+
 export default function ActivityFeed() {
-  const [activities, setActivities] = useState<Activity[]>([]);
   const [isLive, setIsLive] = useState(true);
+  
+  const { data, error, isLoading, mutate } = useSWR('activity-feed', fetcher, {
+    refreshInterval: isLive ? 5000 : 0, // Refresh every 5 seconds when live
+    revalidateOnFocus: false
+  });
 
-  // Generate initial activities
-  useEffect(() => {
-    const initialActivities = Array.from({ length: 5 }, (_, i) => {
-      const template = activityTemplates[Math.floor(Math.random() * activityTemplates.length)];
-      const region = regions[Math.floor(Math.random() * regions.length)];
-      return {
-        id: `activity-${i}`,
-        type: template.type as Activity['type'],
-        message: template.message.replace('{region}', region),
-        timestamp: new Date(Date.now() - Math.random() * 3600000), // Random time in last hour
-        regionName: region,
-        severity: template.severity as Activity['severity'],
-      };
-    });
-    setActivities(initialActivities.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()));
-  }, []);
+  const activities = data?.activities || [];
 
-  // Generate new activities periodically
-  useEffect(() => {
-    if (!isLive) return;
-    
-    const interval = setInterval(() => {
-      const template = activityTemplates[Math.floor(Math.random() * activityTemplates.length)];
-      const region = regions[Math.floor(Math.random() * regions.length)];
-      
-      const newActivity: Activity = {
-        id: `activity-${Date.now()}`,
-        type: template.type as Activity['type'],
-        message: template.message.replace('{region}', region),
-        timestamp: new Date(),
-        regionName: region,
-        severity: template.severity as Activity['severity'],
-      };
-
-      setActivities(prev => [newActivity, ...prev.slice(0, 19)]); // Keep only 20 activities
-    }, Math.random() * 5000 + 3000); // Random interval between 3-8 seconds
-
-    return () => clearInterval(interval);
-  }, [isLive]);
-
-  // Update timestamps every 30 seconds
+  // Update timestamps every 30 seconds to show relative time
   useEffect(() => {
     const interval = setInterval(() => {
-      setActivities(prev => [...prev]); // Force re-render to update timestamps
+      mutate(); // Trigger re-render for timestamp updates
     }, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [mutate]);
+
+  if (error) {
+    return (
+      <div className="h-full flex flex-col bg-white">
+        <div className="flex items-center justify-between p-4 border-b bg-gray-50">
+          <h3 className="text-sm font-semibold text-gray-800">Activity Feed</h3>
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">
+            <div className="w-2 h-2 rounded-full bg-red-500" />
+            Error
+          </div>
+        </div>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center text-gray-500">
+            <div className="text-2xl mb-2">❌</div>
+            <p className="text-sm">Failed to load activity feed</p>
+            <p className="text-xs text-gray-400">{error.message}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col bg-white">
@@ -140,7 +118,14 @@ export default function ActivityFeed() {
       </div>
       
       <div className="flex-1 overflow-y-auto">
-        {activities.length === 0 ? (
+        {isLoading ? (
+          <div className="flex items-center justify-center h-full text-gray-500">
+            <div className="text-center">
+              <div className="text-2xl mb-2 animate-spin">⚙️</div>
+              <p className="text-sm">Loading activity...</p>
+            </div>
+          </div>
+        ) : activities.length === 0 ? (
           <div className="flex items-center justify-center h-full text-gray-500">
             <div className="text-center">
               <div className="text-2xl mb-2">📋</div>
@@ -149,11 +134,10 @@ export default function ActivityFeed() {
           </div>
         ) : (
           <div className="space-y-0">
-            {activities.map((activity, index) => (
+            {activities.map((activity: Activity, index: number) => (
               <div
                 key={activity.id}
-                className={`border-l-4 p-3 border-b border-gray-100 hover:bg-gray-50 transition-colors animate-in slide-in-from-top duration-300 ${getSeverityBg(activity.severity)}`}
-                style={{ animationDelay: `${index * 50}ms` }}
+                className={`border-l-4 p-3 border-b border-gray-100 hover:bg-gray-50 transition-colors ${getSeverityBg(activity.severity)}`}
               >
                 <div className="flex items-start gap-3">
                   <span className="text-lg flex-shrink-0">{getActivityIcon(activity.type)}</span>
@@ -165,9 +149,9 @@ export default function ActivityFeed() {
                       <span className="text-xs text-gray-500">
                         {formatTimestamp(activity.timestamp)}
                       </span>
-                      {activity.regionName && (
+                      {activity.service && (
                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                          {activity.regionName}
+                          {activity.service}
                         </span>
                       )}
                     </div>

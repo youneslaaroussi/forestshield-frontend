@@ -30,19 +30,6 @@ export function useAlertSubscriptions(): UseAlertSubscriptionsResult {
     } catch (err) {
       console.error('Failed to fetch subscriptions:', err);
       setError('Failed to load alert subscriptions');
-      // Set mock data as fallback for development
-      setSubscriptions([
-        {
-          email: 'user@example.com',
-          subscriptionArn: 'arn:aws:sns:us-west-2:123456789:forestshield-alerts:123',
-          status: 'Confirmed'
-        },
-        {
-          email: 'admin@forestshield.com',
-          subscriptionArn: 'arn:aws:sns:us-west-2:123456789:forestshield-alerts:456',
-          status: 'PendingConfirmation'
-        }
-      ]);
     }
   }, []);
 

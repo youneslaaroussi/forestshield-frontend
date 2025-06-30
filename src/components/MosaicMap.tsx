@@ -18,7 +18,7 @@ L.Icon.Default.mergeOptions({
 });
 
 // Create custom icons for different region statuses
-const createRegionIcon = (status: Region['status'], deforestationLevel?: number) => {
+  const createRegionIcon = (status: Region['status'], deforestationLevel?: number, isNdviMode = false) => {
   let color = '#00ff88'; // bright green for active
   if (status === 'PAUSED') color = '#ffaa00'; // bright orange for paused
   if (status === 'MONITORING') color = '#00aaff'; // bright blue for monitoring
@@ -31,24 +31,26 @@ const createRegionIcon = (status: Region['status'], deforestationLevel?: number)
     html: `
       <div style="
         position: relative;
-        width: 32px;
-        height: 32px;
+        width: ${isNdviMode ? '40px' : '32px'};
+        height: ${isNdviMode ? '40px' : '32px'};
         background: ${color};
         border-radius: 50%;
-        border: 3px solid rgba(255,255,255,0.9);
+        border: 3px solid ${isNdviMode ? '#0972d3' : 'rgba(255,255,255,0.9)'};
         box-shadow: 0 0 20px rgba(${color.slice(1,3)}, ${color.slice(3,5)}, ${color.slice(5,7)}, 0.6),
-                    0 0 40px rgba(${color.slice(1,3)}, ${color.slice(3,5)}, ${color.slice(5,7)}, 0.3);
+                    0 0 40px rgba(${color.slice(1,3)}, ${color.slice(3,5)}, ${color.slice(5,7)}, 0.3)${isNdviMode ? ', 0 0 60px rgba(9, 114, 211, 0.4)' : ''};
         display: flex;
         align-items: center;
         justify-content: center;
         color: white;
         font-weight: bold;
-        font-size: 16px;
-      ">🛰️</div>
+        font-size: ${isNdviMode ? '18px' : '16px'};
+        ${isNdviMode ? 'animation: pulse-ndvi 2s infinite;' : ''}
+      ">${isNdviMode ? '📊' : '🛰️'}</div>
+      ${isNdviMode ? '<style>@keyframes pulse-ndvi { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }</style>' : ''}
     `,
     className: 'custom-region-marker',
-    iconSize: [32, 32],
-    iconAnchor: [16, 16],
+    iconSize: [isNdviMode ? 40 : 32, isNdviMode ? 40 : 32],
+    iconAnchor: [isNdviMode ? 20 : 16, isNdviMode ? 20 : 16],
   });
 };
 
@@ -132,7 +134,7 @@ function DragCreateHandler({
   const map = useMap();
 
   useMapEvents({
-    mousedown(e) {
+    mousedown(e: any) {
       if (isCreating) {
         e.originalEvent.preventDefault();
         setDragState({
@@ -149,7 +151,7 @@ function DragCreateHandler({
         document.body.style.webkitUserSelect = 'none';
       }
     },
-    mousemove(e) {
+    mousemove(e: any) {
       if (isCreating && dragState.isDragging && dragState.startPoint) {
         e.originalEvent.preventDefault();
         const radius = dragState.startPoint.distanceTo(e.latlng);
@@ -160,7 +162,7 @@ function DragCreateHandler({
         }));
       }
     },
-    mouseup(e) {
+    mouseup(e: any) {
       if (isCreating && dragState.isDragging && dragState.startPoint) {
         e.originalEvent.preventDefault();
         const radius = dragState.startPoint.distanceTo(e.latlng);
@@ -271,6 +273,7 @@ interface MosaicMapProps {
   onRegionCreated: (region: Region) => void;
   regions: Region[];
   selectedRegion: Region | null;
+  ndviSelectionMode?: boolean;
 }
 
 const MosaicMap = forwardRef<Map, MosaicMapProps>(({ 
@@ -283,7 +286,8 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
   setIsCreating,
   onRegionCreated,
   regions,
-  selectedRegion
+  selectedRegion,
+  ndviSelectionMode = false
 }, ref) => {
   const [mapInstance, setMapInstance] = useState<Map | null>(null);
   const [heatmapPoints, setHeatmapPoints] = useState<any[]>([]);
@@ -501,18 +505,28 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
               <div key={region.id}>
                 <Marker 
                   position={[region.latitude, region.longitude]}
-                  icon={createRegionIcon(region.status, region.lastDeforestationPercentage)}
+                  icon={createRegionIcon(region.status, region.lastDeforestationPercentage, ndviSelectionMode)}
                   eventHandlers={{
                     click: () => onRegionSelected(region),
                   }}
                 >
                   <Popup>
                     <div className={`min-w-[280px] ${isSatelliteView ? 'bg-gray-900 border border-gray-700' : 'bg-white border border-gray-200'} shadow-xl`}>
+                    {/* NDVI Selection Mode Banner */}
+                    {ndviSelectionMode && (
+                      <div className="bg-blue-600 text-white px-4 py-2 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <span>📊</span>
+                          <span className="text-sm font-medium">Click to select for NDVI analysis</span>
+                        </div>
+                      </div>
+                    )}
+                    
                     {/* Header Section */}
                     <div className={`px-4 py-3 border-b ${isSatelliteView ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-gray-50'}`}>
                       <div className="flex items-center justify-between">
                         <h3 className={`font-semibold text-sm ${isSatelliteView ? 'text-white' : 'text-gray-900'}`}>
-                          FOREST REGION
+                          {ndviSelectionMode ? 'NDVI ANALYSIS TARGET' : 'FOREST REGION'}
                         </h3>
                         <div className={`px-2 py-1 text-xs font-medium rounded ${
                           region.status === 'ACTIVE' ? 'bg-green-100 text-green-800' :

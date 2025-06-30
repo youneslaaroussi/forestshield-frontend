@@ -1,8 +1,38 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { Component, ErrorInfo, ReactNode } from 'react';
+import { Component, ErrorInfo, ReactNode, useEffect } from 'react';
 import { useState } from 'react';
+
+// Shared loading component with shimmer effect and fade animations
+const LoadingScreen = ({ isVisible = true, message = "Loading Forest Shield..." }: { 
+  isVisible?: boolean; 
+  message?: string; 
+}) => (
+  <div className={`
+    fixed inset-0 bg-gray-200 flex flex-col items-center justify-center text-gray-600 z-50
+    transition-opacity duration-500 ease-out
+    ${isVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}
+  `}>
+    {/* Shimmer background effect */}
+    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -skew-x-12 animate-shimmer"></div>
+    
+    <div className="relative z-10">
+      <img src="/logo.png" alt="Forest Shield" className="w-96 h-96 animate-pulse" />
+      <div className="text-center mt-8">
+        <div className="text-lg font-medium mb-2">{message}</div>
+        <div className="text-sm">Please wait a moment while we prepare the map...</div>
+        
+        {/* Loading dots animation */}
+        <div className="flex justify-center mt-4 space-x-1">
+          <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></div>
+          <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+          <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+        </div>
+      </div>
+    </div>
+  </div>
+);
 
 // Error boundary class component to catch Leaflet errors
 class MapErrorBoundary extends Component<
@@ -50,11 +80,8 @@ class MapErrorBoundary extends Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="w-full h-screen bg-gray-200 animate-pulse flex items-center justify-center text-gray-600">
-          <div className="text-center">
-            <div className="text-lg font-medium mb-2">Reinitializing Map...</div>
-            <div className="text-sm">Please wait a moment</div>
-          </div>
+        <div className="w-full h-screen relative">
+          <LoadingScreen message="Reinitializing Map..." />
         </div>
       );
     }
@@ -66,11 +93,26 @@ class MapErrorBoundary extends Component<
 // Dynamically import the MosaicLayout component to avoid SSR issues
 const MosaicLayout = dynamic(() => import('./MosaicLayout'), {
   ssr: false,
-  loading: () => <div className="w-full h-screen bg-gray-200 animate-pulse flex items-center justify-center text-gray-600">Loading Forest Shield...</div>
+  loading: () => (
+    <div className="w-full h-screen relative">
+      <LoadingScreen />
+    </div>
+  )
 });
 
 export default function MapWrapper() {
   const [mapKey, setMapKey] = useState(Date.now());
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    setIsLoading(true);
+    
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+    }, 2000);
+    
+    return () => clearTimeout(timer);
+  }, [mapKey]);
 
   const handleError = () => {
     console.log('Forcing complete map restart...');
@@ -78,8 +120,11 @@ export default function MapWrapper() {
   };
 
   return (
-    <MapErrorBoundary mapKey={mapKey} onError={handleError}>
-      <MosaicLayout key={mapKey} />
-    </MapErrorBoundary>
+    <div className="w-full h-screen relative">
+      <MapErrorBoundary mapKey={mapKey} onError={handleError}>
+        <MosaicLayout key={mapKey} />
+      </MapErrorBoundary>
+      <LoadingScreen isVisible={isLoading} />
+    </div>
   );
 } 

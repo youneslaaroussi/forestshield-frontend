@@ -1,4 +1,5 @@
-const API_BASE_URL = 'http://localhost:3000';
+// const API_BASE_URL = 'http://localhost:3000';
+const API_BASE_URL = 'https://api.forestshieldapp.com';
 
 export interface Region {
   id: string;
@@ -88,6 +89,16 @@ export interface SubscribeResponse {
 }
 
 // API Client functions
+
+// Helper to map API's `regionId` to frontend's `id`
+function mapRegionResponse(region: any): Region {
+  const { regionId, ...rest } = region;
+  return {
+    ...rest,
+    id: regionId,
+  };
+}
+
 export const api = {
   // Dashboard endpoints
   async getDashboardStats(): Promise<DashboardStats> {
@@ -102,7 +113,14 @@ export const api = {
     
     const response = await fetch(url.toString());
     if (!response.ok) throw new Error('Failed to fetch regions');
-    return response.json();
+    
+    const data = await response.json();
+    // The API is returning regionId, but the frontend interface expects id.
+    // We map it here to ensure consistency across the app.
+    if (Array.isArray(data)) {
+      return data.map(mapRegionResponse);
+    }
+    return [];
   },
 
   async createRegion(regionData: CreateRegionDto): Promise<Region> {
@@ -112,13 +130,15 @@ export const api = {
       body: JSON.stringify(regionData),
     });
     if (!response.ok) throw new Error('Failed to create region');
-    return response.json();
+    const region = await response.json();
+    return mapRegionResponse(region);
   },
 
   async getRegion(regionId: string): Promise<Region> {
     const response = await fetch(`${API_BASE_URL}/dashboard/regions/${regionId}`);
     if (!response.ok) throw new Error('Failed to fetch region');
-    return response.json();
+    const region = await response.json();
+    return mapRegionResponse(region);
   },
 
   async updateRegion(regionId: string, regionData: Partial<CreateRegionDto>): Promise<Region> {
@@ -128,7 +148,8 @@ export const api = {
       body: JSON.stringify(regionData),
     });
     if (!response.ok) throw new Error('Failed to update region');
-    return response.json();
+    const region = await response.json();
+    return mapRegionResponse(region);
   },
 
   async deleteRegion(regionId: string): Promise<void> {
@@ -184,7 +205,7 @@ export const api = {
     startDate: string,
     endDate: string,
     cloudCover: number
-  ): Promise<{ message: string; jobId: string }> {
+  ): Promise<{ message: string; executionArn: string }> {
     const response = await fetch(`${API_BASE_URL}/sentinel/step-functions/trigger`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -195,7 +216,8 @@ export const api = {
           startDate,
           endDate,
           cloudCover
-        }
+        },
+        maxImages: 20
       }),
     });
     if (!response.ok) throw new Error('Failed to trigger analysis');
@@ -224,5 +246,170 @@ export const api = {
       method: 'DELETE',
     });
     if (!response.ok) throw new Error('Failed to unsubscribe from alerts');
+  },
+
+  // AWS Services & Monitoring endpoints
+  async getAWSServiceMetrics(): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/dashboard/aws/services`);
+    if (!response.ok) throw new Error('Failed to fetch AWS service metrics');
+    return response.json();
+  },
+
+  async getAWSCostData(): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/dashboard/aws/costs`);
+    if (!response.ok) throw new Error('Failed to fetch AWS cost data');
+    return response.json();
+  },
+
+  async getCloudWatchLogs(logGroup?: string, limit?: number): Promise<any> {
+    const params = new URLSearchParams();
+    if (logGroup) params.append('logGroup', logGroup);
+    if (limit) params.append('limit', limit.toString());
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30-second timeout
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/dashboard/aws/logs?${params}`, {
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error('Failed to fetch CloudWatch logs');
+      return response.json();
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        throw new Error('Request timed out after 30 seconds');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  },
+
+  async getStepFunctionExecutions(limit?: number): Promise<any> {
+    const params = new URLSearchParams();
+    if (limit) params.append('limit', limit.toString());
+
+    const response = await fetch(`${API_BASE_URL}/dashboard/aws/step-function-executions?${params}`);
+    if (!response.ok) throw new Error('Failed to fetch Step Function executions');
+    return response.json();
+  },
+
+  async getSystemHealth(): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/dashboard/integration/system-health`);
+    if (!response.ok) throw new Error('Failed to fetch system health');
+    return response.json();
+  },
+
+  async getActivityFeed(limit?: number): Promise<any> {
+    const params = new URLSearchParams();
+    if (limit) params.append('limit', limit.toString());
+    
+    const response = await fetch(`${API_BASE_URL}/dashboard/activity?${params}`);
+    if (!response.ok) throw new Error('Failed to fetch activity feed');
+    return response.json();
+  },
+
+  // NDVI Analysis endpoints
+  async searchSentinelImages(params: {
+    latitude: number;
+    longitude: number;
+    startDate: string;
+    endDate: string;
+    cloudCover: number;
+  }): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/sentinel/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    });
+    if (!response.ok) throw new Error('Failed to search Sentinel images');
+    return response.json();
+  },
+
+  async analyzeRegionForDeforestation(params: {
+    latitude: number;
+    longitude: number;
+    startDate: string;
+    endDate: string;
+    cloudCover: number;
+  }): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/sentinel/analyze-region`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    });
+    if (!response.ok) throw new Error('Failed to analyze region');
+    return response.json();
+  },
+
+  async getJobStatus(jobId: string): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/sentinel/status/${jobId}`);
+    if (!response.ok) throw new Error('Failed to get job status');
+    return response.json();
+  },
+
+  // K-means clustering endpoints (using performance analytics)
+  async getPerformanceOverview(): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/dashboard/performance/overview`);
+    if (!response.ok) throw new Error('Failed to fetch performance overview');
+    return response.json();
+  },
+
+  async getPerformanceTrends(days: number = 30): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/dashboard/performance/trends?days=${days}`);
+    if (!response.ok) throw new Error('Failed to fetch performance trends');
+    return response.json();
+  },
+
+  async getRegionPerformance(regionId: string, limit: number = 50): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/dashboard/performance/regions/${regionId}?limit=${limit}`);
+    if (!response.ok) throw new Error('Failed to fetch region performance data');
+    return response.json();
+  },
+
+  // TIFF Image Processing endpoint (local Next.js API route)
+  async processTiffImage(tiffUrl: string, options?: {
+    width?: number;
+    height?: number;
+    format?: 'jpeg' | 'png' | 'webp';
+    quality?: number;
+  }): Promise<string> {
+    const params = new URLSearchParams();
+    params.append('url', tiffUrl);
+    if (options?.width) params.append('width', options.width.toString());
+    if (options?.height) params.append('height', options.height.toString());
+    if (options?.format) params.append('format', options.format);
+    if (options?.quality) params.append('quality', options.quality.toString());
+
+    const response = await fetch(`/api/process-tiff?${params}`);
+    if (!response.ok) throw new Error('Failed to process TIFF image');
+    
+    // Return the processed image URL or data URL
+    const result = await response.json();
+    return result.imageUrl || result.dataUrl;
+  },
+
+  // Progressive TIFF loading with chunks
+  async getTiffImageChunks(tiffUrl: string, chunkSize: number = 1024 * 1024): Promise<{
+    totalSize: number;
+    chunks: number;
+    baseUrl: string;
+  }> {
+    const response = await fetch(`${API_BASE_URL}/api/tiff-info?url=${encodeURIComponent(tiffUrl)}`);
+    if (!response.ok) throw new Error('Failed to get TIFF info');
+    return response.json();
+  },
+
+  // Visualization endpoints
+  async getRegionVisualizations(regionId: string): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/dashboard/regions/${regionId}/visualizations`);
+    if (!response.ok) throw new Error('Failed to fetch region visualizations');
+    return response.json();
+  },
+
+  async getVisualizationImage(tileId: string, timestamp: string, chartType: string): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/dashboard/visualizations/${tileId}/${timestamp}/${chartType}`);
+    if (!response.ok) throw new Error('Failed to fetch visualization image');
+    return response.json();
   }
 }; 
