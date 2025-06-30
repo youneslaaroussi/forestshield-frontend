@@ -20,6 +20,7 @@ import AWSServicesPanel from './AWSServicesPanel';
 import KMeansClusteringPanel from './KMeansClusteringPanel';
 import NDVIImagePanel from './NDVIImagePanel';
 import RegionsListPanel from './RegionsListPanel';
+import CriticalAlertOverlay from './CriticalAlertOverlay';
 import { ToastContainer, useToast } from './ui/toast';
 
 type ViewId = 'map' | 'details' | 'alerts' | 'jobs' | 'settings' | 'activity' | 'health' | 'logs' | 'aws' | 'kmeans' | 'ndvi' | 'regions';
@@ -1011,6 +1012,9 @@ export default function MosaicLayout() {
           </div>
         </div>
       )}
+
+      {/* Critical Alert Overlay */}
+      <CriticalAlertOverlay />
 
       {/* Toast Container */}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />

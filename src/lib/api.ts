@@ -38,7 +38,7 @@ export interface Alert {
   regionId: string;
   regionName: string;
   level: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
-  deforestationPercentage: number;
+  deforestationPercentage: number | string;
   message: string;
   timestamp: string;
   acknowledged: boolean;
@@ -167,7 +167,16 @@ export const api = {
     
     const response = await fetch(url.toString());
     if (!response.ok) throw new Error('Failed to fetch alerts');
-    return response.json();
+    const data = await response.json();
+    
+    // Map API response fields to interface fields
+    if (Array.isArray(data)) {
+      return data.map((alert: any) => ({
+        ...alert,
+        id: alert.alertId, // Map alertId to id for consistency
+      }));
+    }
+    return [];
   },
 
   async acknowledgeAlert(alertId: string): Promise<void> {
