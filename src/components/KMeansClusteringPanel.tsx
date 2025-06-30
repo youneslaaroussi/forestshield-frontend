@@ -23,30 +23,24 @@ import {
 } from 'lucide-react';
 
 // Interfaces for the visualization API
-interface ChartInfo {
-  type: string;
-  title: string;
+interface VisualizationItem {
+  chartType: string;
+  tileId: string;
+  timestamp: string;
+  url: string;
+  createdAt: string;
   description: string;
 }
 
-interface VisualizationData {
-  tile_id: string;
-  timestamp: string;
-  charts: ChartInfo[];
-}
-
 interface VisualizationsResponse {
-  region_id: string;
-  visualizations: VisualizationData[];
+  regionId: string;
+  regionName: string;
+  visualizations: VisualizationItem[];
+  totalVisualizations: number;
+  retrievedAt: string;
 }
 
-interface VisualizationImageResponse {
-  tile_id: string;
-  timestamp: string;
-  chart_type: string;
-  signed_url: string;
-  expires_at: string;
-}
+
 
 // Chart type metadata
 const CHART_METADATA = {
@@ -83,12 +77,10 @@ interface Props {
 
 export default function KMeansClusteringPanel({ selectedRegion }: Props) {
   const [visualizations, setVisualizations] = useState<VisualizationsResponse | null>(null);
-  const [loadedImages, setLoadedImages] = useState<Record<string, string>>({});
-  const [loadingImages, setLoadingImages] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedVisualization, setSelectedVisualization] = useState<VisualizationData | null>(null);
-  const [selectedChart, setSelectedChart] = useState<ChartInfo | null>(null);
+  const [selectedVisualization, setSelectedVisualization] = useState<VisualizationItem | null>(null);
+  const [selectedChart, setSelectedChart] = useState<VisualizationItem | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -107,8 +99,8 @@ export default function KMeansClusteringPanel({ selectedRegion }: Props) {
         setSelectedVisualization(latestViz);
         
         // Auto-select first chart
-        if (latestViz.charts.length > 0) {
-          setSelectedChart(latestViz.charts[0]);
+        if (latestViz.chartType) {
+          setSelectedChart(latestViz);
         }
       }
     } catch (err) {
@@ -119,32 +111,7 @@ export default function KMeansClusteringPanel({ selectedRegion }: Props) {
     }
   };
 
-  // Load a specific visualization image
-  const loadVisualizationImage = async (tileId: string, timestamp: string, chartType: string) => {
-    const imageKey = `${tileId}-${timestamp}-${chartType}`;
-    
-    if (loadedImages[imageKey] || loadingImages.has(imageKey)) {
-      return;
-    }
 
-    setLoadingImages(prev => new Set([...prev, imageKey]));
-
-    try {
-      const data: VisualizationImageResponse = await api.getVisualizationImage(tileId, timestamp, chartType);
-      setLoadedImages(prev => ({
-        ...prev,
-        [imageKey]: data.signed_url
-      }));
-    } catch (err) {
-      console.error('Error loading visualization image:', err);
-    } finally {
-      setLoadingImages(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(imageKey);
-        return newSet;
-      });
-    }
-  };
 
   // Effect to load visualizations when region changes
   useEffect(() => {
@@ -154,26 +121,15 @@ export default function KMeansClusteringPanel({ selectedRegion }: Props) {
       setVisualizations(null);
       setSelectedVisualization(null);
       setSelectedChart(null);
-      setLoadedImages({});
     }
   }, [selectedRegion?.id]);
 
-  // Effect to load image when chart selection changes
-  useEffect(() => {
-    if (selectedVisualization && selectedChart) {
-      loadVisualizationImage(
-        selectedVisualization.tile_id,
-        selectedVisualization.timestamp,
-        selectedChart.type
-      );
-    }
-  }, [selectedVisualization, selectedChart]);
+  // Images are directly available via URL, no need to load separately
 
   const handleRefresh = async () => {
     if (!selectedRegion?.id) return;
     
     setRefreshing(true);
-    setLoadedImages({});
     await loadVisualizations(selectedRegion.id);
     setRefreshing(false);
   };
@@ -190,35 +146,28 @@ export default function KMeansClusteringPanel({ selectedRegion }: Props) {
     return date.toLocaleString();
   };
 
-  const getCurrentImageKey = () => {
-    if (!selectedVisualization || !selectedChart) return null;
-    return `${selectedVisualization.tile_id}-${selectedVisualization.timestamp}-${selectedChart.type}`;
-  };
-
   const getCurrentImageUrl = () => {
-    const imageKey = getCurrentImageKey();
-    return imageKey ? loadedImages[imageKey] : null;
+    return selectedChart?.url || null;
   };
 
   const isCurrentImageLoading = () => {
-    const imageKey = getCurrentImageKey();
-    return imageKey ? loadingImages.has(imageKey) : false;
+    return false; // Images are directly available via URL
   };
 
   // Navigation functions
   const navigateChart = (direction: 'prev' | 'next') => {
-    if (!selectedVisualization || !selectedChart) return;
+    if (!selectedVisualization || !selectedChart || !visualizations) return;
     
-    const currentIndex = selectedVisualization.charts.findIndex(c => c.type === selectedChart.type);
+    const currentIndex = visualizations.visualizations.findIndex(c => c.chartType === selectedChart.chartType);
     let newIndex;
     
     if (direction === 'prev') {
-      newIndex = currentIndex > 0 ? currentIndex - 1 : selectedVisualization.charts.length - 1;
+      newIndex = currentIndex > 0 ? currentIndex - 1 : visualizations.visualizations.length - 1;
     } else {
-      newIndex = currentIndex < selectedVisualization.charts.length - 1 ? currentIndex + 1 : 0;
+      newIndex = currentIndex < visualizations.visualizations.length - 1 ? currentIndex + 1 : 0;
     }
     
-    setSelectedChart(selectedVisualization.charts[newIndex]);
+    setSelectedChart(visualizations.visualizations[newIndex]);
   };
 
   if (!selectedRegion) {
@@ -323,47 +272,25 @@ export default function KMeansClusteringPanel({ selectedRegion }: Props) {
 
       {/* Content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar - Visualization Selection */}
-        {visualizations.visualizations.length > 1 && (
-          <div className="w-64 bg-white border-r border-gray-200 flex flex-col">
-            <div className="p-3 border-b border-gray-200">
-              <h4 className="font-medium text-gray-800 text-sm">Available Analyses</h4>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              {visualizations.visualizations.map((viz) => (
-                <button
-                  key={`${viz.tile_id}-${viz.timestamp}`}
-                  onClick={() => {
-                    setSelectedVisualization(viz);
-                    setSelectedChart(viz.charts[0] || null);
-                  }}
-                  className={`w-full p-3 text-left border-b border-gray-100 hover:bg-gray-50 transition-colors ${
-                    selectedVisualization?.timestamp === viz.timestamp ? 'bg-blue-50 border-blue-200' : ''
-                  }`}
-                >
-                  <div className="text-sm font-medium text-gray-800">{viz.tile_id}</div>
-                  <div className="text-xs text-gray-600">{formatTimestamp(viz.timestamp)}</div>
-                  <div className="text-xs text-gray-500 mt-1">{viz.charts.length} charts</div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+
 
         {/* Main Content */}
         <div className="flex-1 flex flex-col">
           {/* Chart Type Selector */}
-          {selectedVisualization && (
+          {visualizations && visualizations.visualizations.length > 1 && (
             <div className="bg-white border-b border-gray-200 p-3">
               <div className="flex items-center gap-2 overflow-x-auto">
-                {selectedVisualization.charts.map((chart) => {
-                  const metadata = CHART_METADATA[chart.type as keyof typeof CHART_METADATA];
-                  const isSelected = selectedChart?.type === chart.type;
+                {visualizations.visualizations.map((chart) => {
+                  const metadata = CHART_METADATA[chart.chartType as keyof typeof CHART_METADATA];
+                  const isSelected = selectedChart?.chartType === chart.chartType;
                   
                   return (
                     <button
-                      key={chart.type}
-                      onClick={() => setSelectedChart(chart)}
+                      key={chart.chartType}
+                      onClick={() => {
+                        setSelectedVisualization(chart);
+                        setSelectedChart(chart);
+                      }}
                       className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
                         isSelected
                           ? `${metadata?.color || 'bg-blue-100 text-blue-700'} border border-blue-300`
@@ -371,7 +298,7 @@ export default function KMeansClusteringPanel({ selectedRegion }: Props) {
                       }`}
                     >
                       {metadata?.icon || <Image size={14} />}
-                      {chart.title}
+                      {chart.chartType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                     </button>
                   );
                 })}
@@ -387,12 +314,12 @@ export default function KMeansClusteringPanel({ selectedRegion }: Props) {
                 <div className="p-4 border-b border-gray-200">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h4 className="text-lg font-semibold text-gray-800">{selectedChart.title}</h4>
+                      <h4 className="text-lg font-semibold text-gray-800">{selectedChart.chartType}</h4>
                       <p className="text-sm text-gray-600 mt-1">{selectedChart.description}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       {/* Navigation */}
-                      {selectedVisualization.charts.length > 1 && (
+                      {visualizations.visualizations.length > 1 && (
                         <div className="flex items-center border border-gray-300 rounded">
                           <button
                             onClick={() => navigateChart('prev')}
@@ -402,7 +329,7 @@ export default function KMeansClusteringPanel({ selectedRegion }: Props) {
                             <ChevronLeft size={16} />
                           </button>
                           <span className="px-2 text-sm text-gray-600 border-x border-gray-300">
-                            {selectedVisualization.charts.findIndex(c => c.type === selectedChart.type) + 1} of {selectedVisualization.charts.length}
+                            {visualizations.visualizations.findIndex(c => c.chartType === selectedChart.chartType) + 1} of {visualizations.visualizations.length}
                           </span>
                           <button
                             onClick={() => navigateChart('next')}
@@ -426,7 +353,7 @@ export default function KMeansClusteringPanel({ selectedRegion }: Props) {
                       {getCurrentImageUrl() && (
                         <a
                           href={getCurrentImageUrl()!}
-                          download={`${selectedChart.type}-${selectedVisualization.timestamp}.png`}
+                          download={`${selectedChart.chartType}-${selectedVisualization.timestamp}.png`}
                           className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors"
                           title="Download image"
                         >
@@ -448,7 +375,7 @@ export default function KMeansClusteringPanel({ selectedRegion }: Props) {
                     ) : getCurrentImageUrl() ? (
                       <img
                         src={getCurrentImageUrl()!}
-                        alt={selectedChart.title}
+                        alt={selectedChart.chartType}
                         className="max-w-full max-h-full object-contain rounded"
                         onError={(e) => {
                           console.error('Failed to load image:', getCurrentImageUrl());
@@ -460,14 +387,10 @@ export default function KMeansClusteringPanel({ selectedRegion }: Props) {
                         <Image size={32} className="mx-auto mb-3" />
                         <p className="text-sm">Failed to load visualization</p>
                         <button
-                          onClick={() => selectedVisualization && loadVisualizationImage(
-                            selectedVisualization.tile_id,
-                            selectedVisualization.timestamp,
-                            selectedChart.type
-                          )}
+                          onClick={() => window.location.reload()}
                           className="mt-2 text-xs text-blue-600 hover:text-blue-700"
                         >
-                          Try again
+                          Reload page
                         </button>
                       </div>
                     )}
@@ -497,7 +420,7 @@ export default function KMeansClusteringPanel({ selectedRegion }: Props) {
             </button>
             <img
               src={getCurrentImageUrl()!}
-              alt={selectedChart?.title || 'Visualization'}
+              alt={selectedChart?.chartType || 'Visualization'}
               className="max-w-full max-h-full object-contain"
             />
           </div>
