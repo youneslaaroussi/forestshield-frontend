@@ -4,7 +4,7 @@ import { useEffect, useState, forwardRef, useImperativeHandle } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, useMapEvents, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L, { Map } from 'leaflet';
-import { Region, CreateRegionDto, api, HeatmapDataPoint } from '../lib/api';
+import { Region, CreateRegionDto, api, HeatmapDataPoint, AnalysisScheduleDto } from '../lib/api';
 import HeatmapLayer from './HeatmapLayer';
 
 export type { Map as LeafletMap } from 'leaflet';
@@ -18,39 +18,145 @@ L.Icon.Default.mergeOptions({
 });
 
 // Create custom icons for different region statuses
-  const createRegionIcon = (status: Region['status'], deforestationLevel?: number, isNdviMode = false) => {
+const createRegionIcon = (status: Region['status'], deforestationLevel?: number, isNdviMode = false, isScanning = false) => {
   let color = '#00ff88'; // bright green for active
+  let scanningColor = '#00ffff'; // cyan for scanning effect
   if (status === 'PAUSED') color = '#ffaa00'; // bright orange for paused
   if (status === 'MONITORING') color = '#00aaff'; // bright blue for monitoring
   
   // Adjust color based on deforestation level
-  if (deforestationLevel && deforestationLevel > 15) color = '#ff3366'; // bright red for high deforestation
-  else if (deforestationLevel && deforestationLevel > 8) color = '#ffaa00'; // bright orange for moderate
-  
+  if (deforestationLevel && deforestationLevel > 15) {
+    color = '#ff3366'; // bright red for high deforestation
+    scanningColor = '#ff6699';
+  } else if (deforestationLevel && deforestationLevel > 8) {
+    color = '#ffaa00'; // bright orange for moderate
+    scanningColor = '#ffcc33';
+  }
+
+  const isActive = status === 'ACTIVE';
+  const size = isNdviMode ? 40 : 32;
+  const emoji = isNdviMode ? '📊' : (isActive && isScanning ? '🔍' : '🛰️');
+
   return L.divIcon({
     html: `
-      <div style="
+      <div class="region-marker-container" style="
         position: relative;
-        width: ${isNdviMode ? '40px' : '32px'};
-        height: ${isNdviMode ? '40px' : '32px'};
-        background: ${color};
-        border-radius: 50%;
-        border: 3px solid ${isNdviMode ? '#0972d3' : 'rgba(255,255,255,0.9)'};
-        box-shadow: 0 0 20px rgba(${color.slice(1,3)}, ${color.slice(3,5)}, ${color.slice(5,7)}, 0.6),
-                    0 0 40px rgba(${color.slice(1,3)}, ${color.slice(3,5)}, ${color.slice(5,7)}, 0.3)${isNdviMode ? ', 0 0 60px rgba(9, 114, 211, 0.4)' : ''};
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: white;
-        font-weight: bold;
-        font-size: ${isNdviMode ? '18px' : '16px'};
-        ${isNdviMode ? 'animation: pulse-ndvi 2s infinite;' : ''}
-      ">${isNdviMode ? '📊' : '🛰️'}</div>
-      ${isNdviMode ? '<style>@keyframes pulse-ndvi { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }</style>' : ''}
+        width: ${size}px;
+        height: ${size}px;
+      ">
+        <!-- Scanning Ring Animation (only for active regions) -->
+        ${isActive ? `
+          <div class="scanning-ring" style="
+            position: absolute;
+            width: ${size * 2}px;
+            height: ${size * 2}px;
+            top: -${size / 2}px;
+            left: -${size / 2}px;
+            border: 2px solid ${scanningColor};
+            border-radius: 50%;
+            opacity: 0;
+            animation: scanningPulse 3s infinite;
+          "></div>
+          <div class="scanning-ring" style="
+            position: absolute;
+            width: ${size * 1.5}px;
+            height: ${size * 1.5}px;
+            top: -${size / 4}px;
+            left: -${size / 4}px;
+            border: 1px solid ${scanningColor};
+            border-radius: 50%;
+            opacity: 0;
+            animation: scanningPulse 3s infinite 0.5s;
+          "></div>
+        ` : ''}
+        
+        <!-- Main Icon -->
+        <div class="region-icon" style="
+          position: relative;
+          width: ${size}px;
+          height: ${size}px;
+          background: ${color};
+          border-radius: 50%;
+          border: 3px solid ${isNdviMode ? '#0972d3' : 'rgba(255,255,255,0.9)'};
+          box-shadow: 0 0 20px rgba(${parseInt(color.slice(1,3), 16)}, ${parseInt(color.slice(3,5), 16)}, ${parseInt(color.slice(5,7), 16)}, 0.8),
+                      0 0 40px rgba(${parseInt(color.slice(1,3), 16)}, ${parseInt(color.slice(3,5), 16)}, ${parseInt(color.slice(5,7), 16)}, 0.4)${isNdviMode ? ', 0 0 60px rgba(9, 114, 211, 0.4)' : ''};
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-weight: bold;
+          font-size: ${isNdviMode ? '18px' : '16px'};
+          ${isNdviMode ? 'animation: pulse-ndvi 2s infinite;' : ''}
+          ${isActive ? 'animation: activeRegionPulse 2s infinite;' : ''}
+          z-index: 10;
+        ">${emoji}</div>
+        
+        <!-- Scanning Beam (only for active regions) -->
+        ${isActive ? `
+          <div class="scanning-beam" style="
+            position: absolute;
+            width: 2px;
+            height: ${size * 2}px;
+            background: linear-gradient(to bottom, transparent, ${scanningColor}, transparent);
+            top: -${size / 2}px;
+            left: calc(50% - 1px);
+            transform-origin: center ${size}px;
+            animation: scanningBeam 4s infinite linear;
+            opacity: 0.8;
+          "></div>
+        ` : ''}
+      </div>
+      
+      <style>
+        @keyframes scanningPulse {
+          0%, 100% { 
+            opacity: 0; 
+            transform: scale(0.8); 
+          }
+          50% { 
+            opacity: 0.6; 
+            transform: scale(1.2); 
+          }
+        }
+        
+        @keyframes activeRegionPulse {
+          0%, 100% { 
+            box-shadow: 0 0 20px rgba(${parseInt(color.slice(1,3), 16)}, ${parseInt(color.slice(3,5), 16)}, ${parseInt(color.slice(5,7), 16)}, 0.8),
+                        0 0 40px rgba(${parseInt(color.slice(1,3), 16)}, ${parseInt(color.slice(3,5), 16)}, ${parseInt(color.slice(5,7), 16)}, 0.4);
+          }
+          50% { 
+            box-shadow: 0 0 30px rgba(${parseInt(color.slice(1,3), 16)}, ${parseInt(color.slice(3,5), 16)}, ${parseInt(color.slice(5,7), 16)}, 1),
+                        0 0 60px rgba(${parseInt(color.slice(1,3), 16)}, ${parseInt(color.slice(3,5), 16)}, ${parseInt(color.slice(5,7), 16)}, 0.6),
+                        0 0 80px ${scanningColor};
+          }
+        }
+        
+        @keyframes scanningBeam {
+          0% { 
+            transform: rotate(0deg); 
+            opacity: 0; 
+          }
+          20% { 
+            opacity: 0.8; 
+          }
+          80% { 
+            opacity: 0.8; 
+          }
+          100% { 
+            transform: rotate(360deg); 
+            opacity: 0; 
+          }
+        }
+        
+        @keyframes pulse-ndvi { 
+          0%, 100% { transform: scale(1); } 
+          50% { transform: scale(1.1); } 
+        }
+      </style>
     `,
     className: 'custom-region-marker',
-    iconSize: [isNdviMode ? 40 : 32, isNdviMode ? 40 : 32],
-    iconAnchor: [isNdviMode ? 20 : 16, isNdviMode ? 20 : 16],
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
   });
 };
 
@@ -292,10 +398,100 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
   const [mapInstance, setMapInstance] = useState<Map | null>(null);
   const [heatmapPoints, setHeatmapPoints] = useState<any[]>([]);
   const [mapKey, setMapKey] = useState<number>(Date.now());
+  
+  // New state for analysis control
+  const [analysisSchedules, setAnalysisSchedules] = useState<Record<string, AnalysisScheduleDto>>({});
+  const [loadingStates, setLoadingStates] = useState<Record<string, boolean>>({});
+  const [scanningRegions, setScanningRegions] = useState<Set<string>>(new Set());
 
   useImperativeHandle(ref, () => mapInstance!, [mapInstance]);
 
   const defaultCenter: [number, number] = [-6.0, -53.0];
+
+  // Fetch analysis schedule for a region
+  const fetchAnalysisSchedule = async (regionId: string) => {
+    try {
+      const schedule = await api.getAnalysisSchedule(regionId);
+      setAnalysisSchedules(prev => ({ ...prev, [regionId]: schedule }));
+      
+      // Update scanning state based on status
+      if (schedule.status === 'ACTIVE') {
+        setScanningRegions(prev => new Set([...prev, regionId]));
+      } else {
+        setScanningRegions(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(regionId);
+          return newSet;
+        });
+      }
+    } catch (error) {
+      console.warn(`Failed to fetch analysis schedule for region ${regionId}:`, error);
+    }
+  };
+
+  // Load analysis schedules for all regions
+  useEffect(() => {
+    if (regions.length > 0) {
+      regions.forEach(region => {
+        fetchAnalysisSchedule(region.id);
+      });
+    }
+  }, [regions]);
+
+  // Handle pause region analysis
+  const handlePauseAnalysis = async (regionId: string) => {
+    setLoadingStates(prev => ({ ...prev, [regionId]: true }));
+    try {
+      const result = await api.pauseRegionAnalysis(regionId);
+      setAnalysisSchedules(prev => ({ ...prev, [regionId]: { ...prev[regionId], status: result.status } }));
+      setScanningRegions(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(regionId);
+        return newSet;
+      });
+      
+      // Play pause/stop sound effect
+      try {
+        const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LBwUKlgAFAMaGzZ4i5g8J6EvWIgkKEczg1wTOZdKy8nGOAcGxBOu8+2wMPgQnDxD1QZsGMwQqKrClKHRLOyWNSgq1MgQOnhQkGMZmTHD8kZtM8YnVoZD2uxCLMzJdHqYMGh8NVNQN3gXYnIyW');
+        audio.volume = 0.3;
+        audio.play().catch(() => {}); // Ignore audio errors
+      } catch {}
+      
+      onError && onError(`Analysis paused for ${regions.find(r => r.id === regionId)?.name || 'region'}`);
+    } catch (error) {
+      console.error('Failed to pause analysis:', error);
+      onError && onError(`Failed to pause analysis: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setLoadingStates(prev => ({ ...prev, [regionId]: false }));
+    }
+  };
+
+  // Handle resume/start region analysis
+  const handleStartAnalysis = async (regionId: string) => {
+    setLoadingStates(prev => ({ ...prev, [regionId]: true }));
+    try {
+      const result = await api.startRegionAnalysis(regionId, {
+        cronExpression: '*/30 * * * *', // Every 30 minutes by default
+        triggerImmediate: false
+      });
+      setAnalysisSchedules(prev => ({ ...prev, [regionId]: { ...prev[regionId], status: result.status } }));
+      setScanningRegions(prev => new Set([...prev, regionId]));
+      
+      // Play start/activation sound effect
+      try {
+        const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDwULsagFGNaGzZ4i5g8J6gvWIgkKEczg1wTOZdKy8nGOAcGxBOu8+2wMPQQnDxD1QZsGMwQqKrClKHRLOyWNSgq1MgQOnhQkGNZmTHD8kZtM8YnVoZD2uxCLMzJdHqYMGh8NVNQN3gXYnIyW');
+        audio.volume = 0.4;
+        audio.play().catch(() => {}); // Ignore audio errors
+      } catch {}
+      
+      onError && onError(`Analysis started for ${regions.find(r => r.id === regionId)?.name || 'region'}`);
+    } catch (error) {
+      console.error('Failed to start analysis:', error);
+      onError && onError(`Failed to start analysis: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setLoadingStates(prev => ({ ...prev, [regionId]: false }));
+    }
+  };
 
   // Cleanup function for map instance
   useEffect(() => {
@@ -352,7 +548,7 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
     return '#00aaff'; // bright blue
   };
 
-  const renderModernRadiusCircles = (region: Region) => {
+  const renderModernRadiusCircles = (region: Region, isScanning = false) => {
     // Defensive checks to prevent geometry errors
     if (!region || typeof region.latitude !== 'number' || typeof region.longitude !== 'number' || typeof region.radiusKm !== 'number') {
       console.warn('Invalid region data for rendering circles:', region);
@@ -364,12 +560,50 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
     }
 
     try {
+      const schedule = analysisSchedules[region.id];
+      const status = schedule?.status || region.status;
       const color = getRegionStatusColor(region);
       const center: [number, number] = [region.latitude, region.longitude];
       const radius = region.radiusKm * 1000; // Convert km to meters
       
+      // Enhanced colors for scanning effect
+      const scanningColor = status === 'ACTIVE' ? '#00ffff' : color;
+      const pulseOpacity = isScanning ? 0.3 : 0.05;
+      
       return (
         <div key={`circles-${region.id}`}>
+          {/* Scanning pulse effect for active regions */}
+          {status === 'ACTIVE' && isScanning && (
+            <>
+              <Circle
+                center={center}
+                radius={radius * 1.3}
+                pathOptions={{
+                  color: scanningColor,
+                  fillColor: scanningColor,
+                  fillOpacity: 0.1,
+                  weight: 3,
+                  opacity: 0.6,
+                  dashArray: '15, 10',
+                  className: 'scanning-outer-ring'
+                }}
+              />
+              <Circle
+                center={center}
+                radius={radius * 1.15}
+                pathOptions={{
+                  color: scanningColor,
+                  fillColor: 'transparent',
+                  fillOpacity: 0,
+                  weight: 2,
+                  opacity: 0.8,
+                  dashArray: '8, 6',
+                  className: 'scanning-middle-ring'
+                }}
+              />
+            </>
+          )}
+          
           {/* Outer detection perimeter */}
           <Circle
             center={center}
@@ -377,10 +611,10 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
             pathOptions={{
               color: color,
               fillColor: color,
-              fillOpacity: 0.05,
-              weight: 2,
-              opacity: 0.8,
-              dashArray: '10, 5',
+              fillOpacity: pulseOpacity,
+              weight: isScanning ? 3 : 2,
+              opacity: isScanning ? 1 : 0.8,
+              dashArray: isScanning ? '12, 8' : '10, 5',
             }}
           />
           
@@ -391,10 +625,10 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
             pathOptions={{
               color: color,
               fillColor: color,
-              fillOpacity: 0.1,
-              weight: 1.5,
-              opacity: 0.6,
-              dashArray: '5, 5',
+              fillOpacity: isScanning ? 0.15 : 0.1,
+              weight: isScanning ? 2 : 1.5,
+              opacity: isScanning ? 0.8 : 0.6,
+              dashArray: isScanning ? '8, 4' : '5, 5',
             }}
           />
           
@@ -405,13 +639,11 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
             pathOptions={{
               color: color,
               fillColor: color,
-              fillOpacity: 0.15,
-              weight: 1,
-              opacity: 0.9,
+              fillOpacity: isScanning ? 0.25 : 0.15,
+              weight: isScanning ? 2 : 1,
+              opacity: 1,
             }}
           />
-          
-
         </div>
       );
     } catch (error) {
@@ -447,6 +679,84 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
         
         .leaflet-popup-tip-container {
           border-radius: 0 !important;
+        }
+
+        /* Enhanced scanning ring animations */
+        .scanning-outer-ring {
+          animation: scanningOuterRing 4s infinite ease-in-out;
+        }
+        
+        .scanning-middle-ring {
+          animation: scanningMiddleRing 3s infinite ease-in-out 0.5s;
+        }
+        
+        @keyframes scanningOuterRing {
+          0%, 100% { 
+            stroke-opacity: 0.3; 
+            stroke-dashoffset: 0;
+            filter: drop-shadow(0 0 8px currentColor);
+          }
+          50% { 
+            stroke-opacity: 0.8; 
+            stroke-dashoffset: 25;
+            filter: drop-shadow(0 0 16px currentColor) drop-shadow(0 0 32px currentColor);
+          }
+        }
+        
+        @keyframes scanningMiddleRing {
+          0%, 100% { 
+            stroke-opacity: 0.5; 
+            stroke-dashoffset: 0;
+          }
+          50% { 
+            stroke-opacity: 1; 
+            stroke-dashoffset: -14;
+          }
+        }
+
+        /* Futuristic glow effects for active regions */
+        .leaflet-interactive[stroke="#00ff88"] {
+          filter: drop-shadow(0 0 6px #00ff88) drop-shadow(0 0 12px #00ff88aa);
+        }
+        
+        .leaflet-interactive[stroke="#00ffff"] {
+          filter: drop-shadow(0 0 8px #00ffff) drop-shadow(0 0 16px #00ffff66);
+          animation: cyberGlow 2s infinite alternate;
+        }
+        
+        @keyframes cyberGlow {
+          0% { 
+            filter: drop-shadow(0 0 8px #00ffff) drop-shadow(0 0 16px #00ffff66);
+          }
+          100% { 
+            filter: drop-shadow(0 0 12px #00ffff) drop-shadow(0 0 24px #00ffff88) drop-shadow(0 0 36px #00ffff44);
+          }
+        }
+
+        /* Popup button hover effects */
+        .leaflet-popup button:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        .leaflet-popup button:active {
+          transform: translateY(0);
+        }
+
+        /* Enhanced marker pulsing for active scanning */
+        .custom-region-marker.scanning {
+          animation: scannerPulse 1.5s infinite;
+        }
+        
+        @keyframes scannerPulse {
+          0%, 100% { 
+            transform: scale(1); 
+            filter: brightness(1); 
+          }
+          50% { 
+            transform: scale(1.1); 
+            filter: brightness(1.3) saturate(1.5); 
+          }
         }
       `}</style>
 
@@ -500,12 +810,20 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
 
           try {
             const isSelected = selectedRegion?.id === region.id;
+            const schedule = analysisSchedules[region.id];
+            const isScanning = scanningRegions.has(region.id);
+            const isLoading = loadingStates[region.id] || false;
             
             return (
               <div key={region.id}>
                 <Marker 
                   position={[region.latitude, region.longitude]}
-                  icon={createRegionIcon(region.status, region.lastDeforestationPercentage, ndviSelectionMode)}
+                  icon={createRegionIcon(
+                    schedule?.status || region.status, 
+                    region.lastDeforestationPercentage, 
+                    ndviSelectionMode,
+                    isScanning
+                  )}
                   eventHandlers={{
                     click: () => onRegionSelected(region),
                   }}
@@ -547,6 +865,99 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
                         {region.description}
                       </p>
 
+                      {/* Analysis Status Panel */}
+                      {schedule && (
+                        <div className={`mb-4 p-3 border-l-4 ${
+                          schedule.status === 'ACTIVE' ? 'border-green-500 bg-green-50' :
+                          schedule.status === 'PAUSED' ? 'border-yellow-500 bg-yellow-50' :
+                          'border-blue-500 bg-blue-50'
+                        } ${isSatelliteView ? 'bg-opacity-20' : ''}`}>
+                          <div className="flex items-center justify-between mb-2">
+                            <div className={`text-xs font-medium ${
+                              schedule.status === 'ACTIVE' ? 'text-green-700' :
+                              schedule.status === 'PAUSED' ? 'text-yellow-700' :
+                              'text-blue-700'
+                            } ${isSatelliteView ? 'text-opacity-80' : ''}`}>
+                              {schedule.status === 'ACTIVE' ? '🔄 ACTIVELY SCANNING' :
+                               schedule.status === 'PAUSED' ? '⏸️ ANALYSIS PAUSED' :
+                               '📊 MANUAL MONITORING'}
+                            </div>
+                            {schedule.status === 'ACTIVE' && (
+                              <div className="flex items-center gap-1">
+                                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                                <span className="text-xs text-green-600 font-medium">LIVE</span>
+                              </div>
+                            )}
+                          </div>
+                          {schedule.nextAnalysis && (
+                            <div className={`text-xs ${isSatelliteView ? 'text-gray-400' : 'text-gray-600'}`}>
+                              Next scan: {new Date(schedule.nextAnalysis).toLocaleTimeString()}
+                            </div>
+                          )}
+                          {schedule.analysesLast24h > 0 && (
+                            <div className={`text-xs ${isSatelliteView ? 'text-gray-400' : 'text-gray-600'}`}>
+                              {schedule.analysesLast24h} scans in last 24h
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Control Buttons */}
+                      {!ndviSelectionMode && (
+                        <div className="mb-4 flex gap-2">
+                          {schedule?.status === 'ACTIVE' ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handlePauseAnalysis(region.id);
+                              }}
+                              disabled={isLoading}
+                              className={`flex-1 px-3 py-2 text-xs font-medium rounded transition-all ${
+                                isLoading 
+                                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                                  : 'bg-yellow-600 hover:bg-yellow-700 text-white hover:scale-105 active:scale-95'
+                              } ${isSatelliteView ? 'bg-opacity-90' : ''}`}
+                            >
+                              {isLoading ? (
+                                <div className="flex items-center justify-center gap-2">
+                                  <div className="w-3 h-3 border border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+                                  <span>PAUSING...</span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center justify-center gap-2">
+                                  <span>⏸️</span>
+                                  <span>PAUSE SCANNING</span>
+                                </div>
+                              )}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStartAnalysis(region.id);
+                              }}
+                              disabled={isLoading}
+                              className={`flex-1 px-3 py-2 text-xs font-medium rounded transition-all ${
+                                isLoading 
+                                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                                  : 'bg-green-600 hover:bg-green-700 text-white hover:scale-105 active:scale-95'
+                              } ${isSatelliteView ? 'bg-opacity-90' : ''}`}
+                            >
+                              {isLoading ? (
+                                <div className="flex items-center justify-center gap-2">
+                                  <div className="w-3 h-3 border border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+                                  <span>STARTING...</span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center justify-center gap-2">
+                                  <span>START SCANNING</span>
+                                </div>
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      )}
+
                       {/* Metrics Grid */}
                       <div className="grid grid-cols-2 gap-4">
                         <div className={`p-3 ${isSatelliteView ? 'bg-gray-800 border border-gray-700' : 'bg-gray-50 border border-gray-200'}`}>
@@ -573,16 +984,18 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
                       </div>
 
                       {/* Last Analysis */}
-                      {region.lastAnalysis && (
+                      {(region.lastAnalysis || schedule?.lastAnalysis) && (
                         <div className={`mt-4 pt-3 border-t ${isSatelliteView ? 'border-gray-700' : 'border-gray-200'}`}>
                           <div className={`text-xs font-medium ${isSatelliteView ? 'text-gray-400' : 'text-gray-500'}`}>
                             LAST ANALYSIS
                           </div>
                           <div className={`text-sm ${isSatelliteView ? 'text-gray-300' : 'text-gray-700'}`}>
-                            {new Date(region.lastAnalysis).toLocaleDateString('en-US', {
+                            {new Date(region.lastAnalysis || schedule?.lastAnalysis || '').toLocaleDateString('en-US', {
                               year: 'numeric',
                               month: 'short',
-                              day: 'numeric'
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
                             })}
                           </div>
                         </div>
@@ -597,7 +1010,7 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
                 {isSelected ? (
                   // Selected region - add highlight
                   <>
-                    {renderModernRadiusCircles(region)}
+                    {renderModernRadiusCircles(region, isScanning)}
                     <Circle
                       center={[region.latitude, region.longitude]}
                       radius={region.radiusKm * 1000 * 1.1} // Slightly larger outer ring
@@ -612,7 +1025,7 @@ const MosaicMap = forwardRef<Map, MosaicMapProps>(({
                     />
                   </>
                 ) : (
-                  renderModernRadiusCircles(region)
+                  renderModernRadiusCircles(region, isScanning)
                 )}
               </div>
             );

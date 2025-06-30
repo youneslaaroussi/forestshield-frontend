@@ -88,6 +88,31 @@ export interface SubscribeResponse {
   subscriptionArn: string;
 }
 
+// New interfaces for region analysis control
+export interface StartAnalysisDto {
+  cronExpression?: string;
+  triggerImmediate?: boolean;
+}
+
+export interface RegionAnalysisControlDto {
+  regionId: string;
+  status: 'ACTIVE' | 'PAUSED' | 'MONITORING';
+  cronExpression: string | null;
+  updatedAt: string;
+  message: string;
+}
+
+export interface AnalysisScheduleDto {
+  regionId: string;
+  regionName: string;
+  status: 'ACTIVE' | 'PAUSED' | 'MONITORING';
+  cronExpression: string | null;
+  nextAnalysis: string | null;
+  lastAnalysis: string | null;
+  analysesLast24h: number;
+  isActive: boolean;
+}
+
 // API Client functions
 
 // Helper to map API's `regionId` to frontend's `id`
@@ -419,6 +444,31 @@ export const api = {
   async getVisualizationImage(tileId: string, timestamp: string, chartType: string): Promise<any> {
     const response = await fetch(`${API_BASE_URL}/dashboard/visualizations/${tileId}/${timestamp}/${chartType}`);
     if (!response.ok) throw new Error('Failed to fetch visualization image');
+    return response.json();
+  },
+
+  // Region Analysis Control endpoints
+  async startRegionAnalysis(regionId: string, options?: StartAnalysisDto): Promise<RegionAnalysisControlDto> {
+    const response = await fetch(`${API_BASE_URL}/regions/${regionId}/start-analysis`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(options || {}),
+    });
+    if (!response.ok) throw new Error('Failed to start region analysis');
+    return response.json();
+  },
+
+  async pauseRegionAnalysis(regionId: string): Promise<RegionAnalysisControlDto> {
+    const response = await fetch(`${API_BASE_URL}/regions/${regionId}/pause-analysis`, {
+      method: 'POST',
+    });
+    if (!response.ok) throw new Error('Failed to pause region analysis');
+    return response.json();
+  },
+
+  async getAnalysisSchedule(regionId: string): Promise<AnalysisScheduleDto> {
+    const response = await fetch(`${API_BASE_URL}/regions/${regionId}/analysis-schedule`);
+    if (!response.ok) throw new Error('Failed to fetch analysis schedule');
     return response.json();
   }
 }; 
