@@ -258,77 +258,6 @@ const TiffImageViewer = ({
               </div>
             )}
           </div>
-
-          {/* Bottom overlay - NDVI Stats */}
-          <div className="absolute bottom-4 left-4 right-4">
-            <div className="bg-black/80 backdrop-blur-sm rounded-xl p-4 text-white">
-              <div className="flex items-center gap-2 mb-3">
-                <TrendingUp size={16} className="text-green-400" />
-                <span className="text-sm font-medium">NDVI Analysis</span>
-              </div>
-              
-              <div className="grid grid-cols-4 gap-4">
-                <div className="text-center">
-                  <div className="text-xs text-white/70 mb-1">Min</div>
-                  <div className={`text-lg font-bold ${getNDVIColor(stats.min_ndvi)}`}>
-                    {stats.min_ndvi.toFixed(2)}
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-xs text-white/70 mb-1">Mean</div>
-                  <div className={`text-lg font-bold ${getNDVIColor(stats.mean_ndvi)}`}>
-                    {stats.mean_ndvi.toFixed(2)}
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-xs text-white/70 mb-1">Max</div>
-                  <div className={`text-lg font-bold ${getNDVIColor(stats.max_ndvi)}`}>
-                    {stats.max_ndvi.toFixed(2)}
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-xs text-white/70 mb-1">Health</div>
-                  <div className="flex items-center justify-center gap-1">
-                    <div className={`w-2 h-2 rounded-full ${getHealthStatus(stats.mean_ndvi).color}`}></div>
-                    <div className="text-sm font-medium">{getHealthStatus(stats.mean_ndvi).status}</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Vegetation percentage bar */}
-              <div className="mt-3 pt-3 border-t border-white/20">
-                <div className="flex justify-between text-xs text-white/70 mb-1">
-                  <span>Vegetation Coverage</span>
-                  <span>{stats.vegetation_percentage.toFixed(1)}%</span>
-                </div>
-                <div className="w-full bg-white/20 rounded-full h-2">
-                  <div 
-                    className="bg-gradient-to-r from-green-400 to-green-500 h-2 rounded-full transition-all duration-1000"
-                    style={{ width: `${Math.min(stats.vegetation_percentage, 100)}%` }}
-                  ></div>
-                </div>
-              </div>
-
-              {/* Deforestation alert if available */}
-              {(stats.deforestation_percentage !== undefined || stats.alert_message) && (
-                <div className="mt-3 pt-3 border-t border-white/20">
-                  {stats.deforestation_percentage !== undefined && (
-                    <div className="flex justify-between text-xs text-white/70 mb-2">
-                      <span>Deforestation</span>
-                      <span className={`font-medium ${stats.deforestation_percentage > 10 ? 'text-red-400' : stats.deforestation_percentage > 5 ? 'text-orange-400' : 'text-green-400'}`}>
-                        {stats.deforestation_percentage.toFixed(1)}%
-                      </span>
-                    </div>
-                  )}
-                  {stats.alert_message && (
-                    <div className="text-xs text-orange-300 bg-orange-900/30 rounded px-2 py-1">
-                      {stats.alert_message}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
         </>
       )}
     </div>
@@ -435,7 +364,7 @@ export default function NDVIImagePanel({ selectedRegion, onRequestAreaSelection 
       });
 
       if (searchResponse?.images && searchResponse.images.length > 0) {
-        // Get real NDVI analysis for the first image
+        // Get NDVI analysis for the first image
         const analysisResponse = await api.analyzeRegionForDeforestation({
           latitude: selectedArea.center.lat,
           longitude: selectedArea.center.lng,
